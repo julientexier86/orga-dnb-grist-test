@@ -103,6 +103,27 @@ const grandProjet = () => ({ config: { schoolName: 'Collège fictif', year: '202
         clic(w, 'Publier le projet local'); await until(() => /erreur/.test(titre(w)), 'erreur droits');
         assert.match(w.document.body.textContent, /droits insuffisants/);
     }
-    console.log('Pont Grist : protection exigée, publication explicite, envoi automatique, conflits, rechargement partiel, droits OK');
+    // 10. Section illisible : aucune écriture automatique, mais deux issues proposées (plus d'impasse)
+    {
+        const g = fakeGrist(); await Store.installProtection(g.client());
+        const seed = Store.createStore(g.client(), { auteur: 'Seed' });
+        await seed.push(Store.splitDb(grandProjet()), {});
+        const ch = g.tables.DNB_Morceaux.find(m => m.Cle_section === 'rooms'); ch.Contenu = ch.Contenu.slice(0, -3) + 'XXX';
+        const ecrituresAvant = g.log.length;
+        const w = lancer(faux(g), grandProjet());
+        await until(() => /illisible/.test(titre(w)), 'mode illisible');
+        assert.equal(g.log.length, ecrituresAvant, 'aucune écriture automatique');
+        assert.ok(boutons(w).some(b => /Charger les sections lisibles/.test(b)) && boutons(w).some(b => /Publier le projet local/.test(b)), 'deux issues proposées : ' + boutons(w));
+        // issue 1 : charger le lisible
+        clic(w, 'Charger les sections lisibles'); await until(() => /synchronisé/.test(titre(w)), 'chargement du lisible');
+        assert.equal(w.eval('DB.students.length'), 1);
+        // issue 2 (nouvelle ouverture) : publier le projet local répare la section
+        const w2 = lancer(faux(g), grandProjet());
+        await until(() => /illisible/.test(titre(w2)), 'mode illisible 2');
+        clic(w2, 'Publier le projet local'); await until(() => w2.eval('confirms.length') === 1, 'confirmation');
+        w2.eval('confirms[0].ok()'); await until(() => /synchronisé/.test(titre(w2)), 'réparé');
+        assert.equal((await Store.createStore(g.client(), { auteur: 'V' }).pull()).problems.length, 0, 'plus aucune section illisible');
+    }
+    console.log('Pont Grist : protection exigée, publication explicite, envoi automatique, conflits, rechargement partiel, droits, sections illisibles OK');
     process.exit(0); // le pont programme une vérification périodique : on quitte explicitement
 })().catch(e => { console.error(e); process.exit(1); });

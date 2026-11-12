@@ -29,8 +29,8 @@
         b.onclick = async () => { b.disabled = true; try { await fn(); } catch (e) { erreur(e); } finally { b.disabled = false; } };
         return b;
     }
-    const TITRES = { sync: 'synchronisé', conflit: 'conflit', erreur: 'erreur', nonprotege: 'stockage non protégé', absent: 'stockage à initialiser', local: 'projet local (non synchronisé)', vide: 'Grist vide', init: 'connexion…' };
-    const COULEURS = { sync: '#2f6f5e', conflit: '#9a4a2e', erreur: '#9a4a2e', nonprotege: '#9a4a2e', absent: '#9a7a2e', local: '#9a7a2e', vide: '#9a7a2e', init: '#656d70' };
+    const TITRES = { sync: 'synchronisé', conflit: 'conflit', erreur: 'erreur', nonprotege: 'stockage non protégé', absent: 'stockage à initialiser', local: 'projet local (non synchronisé)', illisible: 'section(s) illisible(s)', vide: 'Grist vide', init: 'connexion…' };
+    const COULEURS = { sync: '#2f6f5e', conflit: '#9a4a2e', erreur: '#9a4a2e', nonprotege: '#9a4a2e', absent: '#9a7a2e', local: '#9a7a2e', illisible: '#9a4a2e', vide: '#9a7a2e', init: '#656d70' };
 
     function setMode(mode, msg) {
         st.mode = mode; st.msg = msg || '';
@@ -42,6 +42,7 @@
             ajoute('Initialiser / vérifier le stockage (propriétaire)', installer, true);
             if (mode === 'nonprotege' && !st.verifiable) ajoute('J’ai vérifié la règle dans Grist', () => { st.ok = true; return demarrer(); });
         }
+        if (mode === 'illisible') { ajoute('Charger les sections lisibles', () => chargerDistant(null, true), true); ajoute('Publier le projet local (répare)', confirmerPublication); }
         if (mode === 'vide') ajoute('Publier le projet local dans Grist', publierTout, true);
         if (mode === 'local') { ajoute('Charger depuis Grist', () => chargerDistant(null), true); ajoute('Publier (remplace Grist)', confirmerPublication); }
         if (mode === 'sync') {
@@ -70,7 +71,7 @@
         if (!prot.ok && !st.ok) return setMode('nonprotege', prot.raison + '. Aucune écriture n’est faite tant que la protection contre les écrasements n’est pas en place.');
         const lu = await store.pull();
         st.baseline = lu.baseline;
-        if (lu.problems.length) return setMode('erreur', 'Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', ') + '. Aucune écriture automatique.');
+        if (lu.problems.length) return setMode('illisible', 'Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', ') + '. Aucune écriture automatique ; choisissez.');
         if (!Object.keys(lu.sections).length) return setMode('vide', 'Aucun projet dans ce document Grist. Le projet local n’est pas envoyé automatiquement.');
         if (!(DB.students && DB.students.length) && !(DB.rooms && DB.rooms.length)) return chargerDistant(null);
         const dernier = Object.values(lu.meta).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || {};
@@ -80,9 +81,9 @@
     }
 
     /** cles = null : tout le projet est remplacé par celui de Grist ; sinon seules ces sections, le reste local est conservé. */
-    async function chargerDistant(cles) {
+    async function chargerDistant(cles, ignorerProblemes) {
         const lu = await store.pull();
-        if (lu.problems.length) throw new Error('Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', '));
+        if (lu.problems.length && !ignorerProblemes) throw new Error('Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', '));
         const cibles = cles || Object.keys(lu.sections);
         const local = cles ? sections() : {};
         for (const k of cibles) if (k in lu.sections) local[k] = lu.sections[k];
