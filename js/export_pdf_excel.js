@@ -1144,9 +1144,9 @@ async function exportAnonymousGradeSheet() {
     if (!DB.students || DB.students.length === 0) return showToast("❌ Aucun élève dans la base.", 'error');
     if (typeof ExcelJS === 'undefined') {
         const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js';
+        script.src = 'js/vendor/exceljs.min.js';   // copie locale (ExcelJS 4.3.0, licence MIT) : plus de dépendance à un CDN
         document.head.appendChild(script);
-        await new Promise(resolve => script.onload = resolve);
+        await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = () => reject(new Error('ExcelJS introuvable')); });
     }
     const workbook = new ExcelJS.Workbook();
     let subjects = ["Français", "Mathématiques", "HG", "EMC"];
