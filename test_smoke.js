@@ -24,7 +24,7 @@ assert(document.getElementById('tableStudents'), 'Le tableau des élèves est in
 const missingLocalScripts = [...document.querySelectorAll('script[src]')]
     .map(script => script.getAttribute('src'))
     .filter(src => !src.startsWith('http') && !src.startsWith('//'))
-    .filter(src => !fs.existsSync(path.join(root, src)));
+    .filter(src => !fs.existsSync(path.join(root, src.split(/[?#]/, 1)[0])));
 
 assert(
     missingLocalScripts.length === 0,
