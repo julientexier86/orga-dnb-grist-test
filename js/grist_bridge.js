@@ -41,7 +41,7 @@
                 showConfirm('Charger les élèves, salles, enseignants et affectations des tables Grist ? Cela remplace le projet ouvert dans l’application. Les autres modules repartent vides.', () => {
                     baseline = after; write.disabled = false;
                     loadGlobalData(new File([JSON.stringify(candidate)], 'tables-grist.data', {type:'application/json'}));
-                    setStatus('Tables chargées. Écriture expérimentale limitée aux lignes existantes.');
+                    setStatus('Tables chargées. Écriture limitée aux élèves, salles, enseignants et affectations existants.');
                 });
             } catch (e) { setStatus('Lecture impossible : ' + e.message); }
         };
@@ -54,7 +54,7 @@
                 const actions = window.buildDnbCoreUpdates(now, DB);
                 await grist.docApi.applyUserActions(actions);
                 baseline = await window.getDnbCoreSnapshot(grist.docApi);
-                setStatus('Modifications des lignes existantes enregistrées dans Grist.');
+                setStatus('Élèves, salles, enseignants et affectations existants enregistrés. Autres modules non transmis.');
             } catch(e) { setStatus('Écriture refusée : ' + e.message); }
             finally { write.disabled = !baseline; }
         };
@@ -86,6 +86,7 @@
                 const data = JSON.parse(json);
                 if (!data || !data.config || !Array.isArray(data.students) || !Array.isArray(data.rooms) || !Array.isArray(data.teachers)) throw new Error('Sauvegarde invalide.');
                 showConfirm('Charger la sauvegarde Grist du ' + (t.Date_UTC[i] || 'date inconnue') + ' ? Les données actuellement ouvertes dans l’application seront remplacées. Exporte-les avant si nécessaire.', () => {
+                    baseline = null; write.disabled = true;
                     loadGlobalData(new File([json], 'sauvegarde-grist.data', { type: 'application/json' }));
                     setStatus('Chargement demandé depuis Grist.');
                 });
