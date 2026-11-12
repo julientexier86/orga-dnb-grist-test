@@ -72,3 +72,28 @@ révision ne bouge pas et la protection est inopérante. À vérifier à chaque 
 Limites : mesuré avec le seul rôle propriétaire ; rien ne garantit l'unicité de `Cle` à la création ; une personne
 ayant le droit d'écriture peut modifier `Base`/`Jeton`/`Revision` à la main (colonnes à masquer et à verrouiller).
 Non encore mesuré : rôles éditeur et lecteur, règles de colonne sur les données sensibles.
+
+## Tables structurées : mesures complémentaires (12/11/2026, soir)
+
+Document de laboratoire fictif. Les rôles éditeur et lecteur sont **simulés** par la fonction « voir en tant que »
+de Grist (`aclAsUser_=editor1@example.com` / `viewer@example.com`) depuis le compte propriétaire : ce n'est pas
+encore un essai avec deux vrais comptes.
+
+| Essai | Résultat |
+|---|---|
+| Valeur vide (`null`) dans une colonne numérique ou entière | conservée vide (pas de 0) |
+| Cellule de texte de 340 000 caractères (taille de la signature) | écrite et relue à l'identique |
+| Colonne calculée `SUM(r.Revision for r in T.lookupRecords())` | somme exacte, relue par l'API |
+| Éditeur simulé : écriture périmée | refusée |
+| Éditeur simulé : écriture à jour, saisie simple, ajout de ligne | acceptés, révision +1 |
+| Éditeur simulé : suppression de ligne, modification de structure | refusées |
+| Éditeur simulé : lecture des règles et des colonnes (vérification de la protection) | possible |
+| Lecteur simulé : colonnes visées par `user.Access == VIEWER` -> `-R` | absentes de la réponse |
+| Lecteur simulé : écriture | refusée |
+
+Conséquences dans le code : `DNB_Etat` sert de signature (quelles tables relire, lecture cohérente) ; l'installation
+ajoute `user.Access != OWNER` -> `-S` ; un compte qui ne voit pas toutes les colonnes n'obtient pas l'application
+(message explicite) au lieu de données tronquées.
+
+Reste non prouvé : essai de bout en bout dans un document fictif avec le widget, deux vrais comptes, comportement
+de l'application réelle (et non du simulateur) lors d'un rechargement après fusion.

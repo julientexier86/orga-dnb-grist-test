@@ -49,6 +49,7 @@
         if (mode === 'sync') {
             ajoute('Enregistrer maintenant', () => envoyer(), true);
             ajoute('Historique / restaurer…', () => historique());
+            if (window.DnbPontTables) ajoute('Passer aux tables structurées…', confirmerBascule);
             if (st.distant.length) ajoute('Charger ' + st.distant.length + ' section(s) modifiée(s) par un autre', () => chargerDistant(st.distant), true);
         }
         if (mode === 'conflit') { ajoute('Prendre leur version', () => chargerDistant(st.conflits), true); ajoute('Garder la mienne', garderLaMienne); }
@@ -100,7 +101,29 @@
         st.ok = true; await demarrer(); box.querySelector('[data-m]').textContent += ' (règle ' + res.regle + ')';
     }
 
+    /** Publie un projet dans les blocs (utilisé par « Revenir aux blocs » du pont des tables). */
+    async function publierDansBlocs(db) {
+        const lu = await store.pull();
+        const r = await store.push(Store.splitDb(db), lu.baseline);
+        if (!r.committed) throw new Error('Les blocs ont refusé l’écriture : le document reste en mode tables.');
+    }
+    function confirmerBascule() {
+        showConfirm('Passer ce document aux tables structurées ?\nLes 15 tables DNB_* sont créées et protégées, le projet ouvert y est copié puis relu pour contrôle. Les blocs actuels restent dans le document comme archive et ne sont plus mis à jour. Réservé au propriétaire du document.', async () => {
+            try {
+                await envoyer();                                  // l'archive en blocs est d'abord mise à jour
+                if (st.mode !== 'sync') return;                   // conflit ou refus : on ne bascule pas
+                clearTimeout(st.timer); st.timer = null;
+                await window.DnbPontTables.convertir(grist, JSON.parse(JSON.stringify(DB)), etape);
+                await demarrer();
+            } catch (e) { erreur(e); }
+        }, () => {});
+    }
+
     async function demarrer() {
+        if (window.DnbPontTables) {
+            let tables = false; try { tables = await window.DnbPontTables.actif(grist); } catch (e) { tables = false; }
+            if (tables) { st.mode = 'tables'; clearTimeout(st.timer); st.timer = null; box.style.display = 'none'; return window.DnbPontTables.demarrer(grist, { retourBlocs: publierDansBlocs }); }
+        }
         const noms = (await grist.docApi.listTables()).map(t => (typeof t === 'string' ? t : t.id));
         if (!noms.includes(Store.T_SECTIONS) || !noms.includes(Store.T_MORCEAUX)) return setMode('absent', 'Les tables de stockage n’existent pas dans ce document.');
         const prot = await Store.verifyProtection(grist.docApi);

@@ -21,7 +21,8 @@
     const T = { ELEVES: P + 'Eleves', SALLES: P + 'Salles', ENS: P + 'Enseignants', AFFECT: P + 'Affectations',
         SURV: P + 'Surveillances', EPREUVES: P + 'Epreuves', O_CAND: P + 'Oraux_Candidats', O_ENS: P + 'Oraux_Enseignants',
         O_PASS: P + 'Oraux_Passages', S_JURYS: P + 'Stage_Jurys', S_PASS: P + 'Stage_Passages', RESULTATS: P + 'Resultats',
-        PRESENCES: P + 'Presences', PARAMS: P + 'Parametres' };
+        PRESENCES: P + 'Presences', PARAMS: P + 'Parametres', FICHIERS: P + 'Fichiers' };
+    const SEUIL_FICHIER = 20000;   // au-delà, la valeur (logo, signature) va dans une table à part, relue seulement si elle change
 
     const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
     const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
@@ -113,7 +114,8 @@
             ...[['grades.fr', 'Note_Francais'], ['grades.math', 'Note_Maths'], ['grades.hg', 'Note_HG'], ['grades.emc', 'Note_EMC'], ['grades.sci', 'Note_Sciences'],
                 ['grades.oral', 'Note_Oral'], ['grades.genAvg', 'Moyenne'], ['grades.finalAvg', 'Moyenne_finale'], ['officialMeta.rawHg', 'Brut_HG'], ['officialMeta.rawEmc', 'Brut_EMC']].map(x => [...x, 'Numeric'])],
         [T.PRESENCES]: [],
-        [T.PARAMS]: []
+        [T.PARAMS]: [],
+        [T.FICHIERS]: []
     };
     const COLS_A_LA_MAIN = {
         [T.AFFECT]: [['Salle', 'Text'], ['Eleve', 'Text']],
@@ -121,13 +123,15 @@
         [T.EPREUVES]: [['Profil', 'Text']],
         [T.O_PASS]: [['Jury', 'Text'], ['Eleves', 'Text']],
         [T.PRESENCES]: [['Profil', 'Text']],
-        [T.PARAMS]: [['Valeur', 'Text']]
+        [T.PARAMS]: [['Valeur', 'Text']],
+        [T.FICHIERS]: [['Valeur', 'Text']]
     };
     const TECH = [['Cle', 'Text'], ['Ordre', 'Int'], ['Extra', 'Text'], ['Supprime', 'Bool'], ['Base', 'Int'], ['Jeton', 'Text'], ['Revision', 'Int']];
     const SCHEMA = Object.keys(F).map(t => ({ table: t, colonnes: [TECH[0], TECH[1], ...(COLS_A_LA_MAIN[t] || []), ...F[t].map(([, c, ty]) => [c, ty === 'Liste' ? 'Text' : ty]), ...TECH.slice(2)] }));
     /* Colonnes sensibles : à restreindre par des règles d'accès de colonne pour les simples lecteurs. */
     const SENSIBLES = { [T.ELEVES]: ['Tiers_temps', 'Amenagements', ...NOTES_BLANC.map(x => x[1]), 'Extra'],
-        [T.RESULTATS]: ['INE', 'Numero_candidat', 'Resultat', 'Note_Francais', 'Note_Maths', 'Note_HG', 'Note_EMC', 'Note_Sciences', 'Note_Oral', 'Moyenne', 'Moyenne_finale', 'Brut_HG', 'Brut_EMC', 'Extra'] };
+        [T.RESULTATS]: ['INE', 'Numero_candidat', 'Resultat', 'Note_Francais', 'Note_Maths', 'Note_HG', 'Note_EMC', 'Note_Sciences', 'Note_Oral', 'Moyenne', 'Moyenne_finale', 'Brut_HG', 'Brut_EMC', 'Extra'],
+        [T.PRESENCES]: ['Extra'] };
 
     /* ---------- Clés stables ---------- */
     function cles(list, idDe) {
@@ -197,7 +201,7 @@
     const indexer = list => { const m = new Map(); if (Array.isArray(list)) for (const o of list) if (isObj(o) && (typeof o.id === 'string' || typeof o.id === 'number') && !m.has(String(o.id))) m.set(String(o.id), o); return m; };
 
     const SECTIONS_TABLES = ['students', 'rooms', 'teachers', 'distribution', 'planning', 'planningReserve', 'exams', 'examProfiles', 'oralConfig', 'stage', 'officialResults', 'examAttendance', 'examAttendanceProfiles'];
-    const param = (out, cle, v, ordre) => out[T.PARAMS].push({ Cle: cle, Ordre: ordre || 0, Valeur: JSON.stringify(v), Extra: '' });
+    const param = (out, cle, v, ordre) => { const j = JSON.stringify(v); out[j.length > SEUIL_FICHIER && cle !== '_structure' ? T.FICHIERS : T.PARAMS].push({ Cle: cle, Ordre: ordre || 0, Valeur: j, Extra: '' }); };
 
     function encode(db) {
         const out = {}; for (const t of Object.keys(F)) out[t] = [];
@@ -283,10 +287,11 @@
     }
 
     function decode(rows) {
-        const R = t => (rows[t] || []).filter(r => !r.Supprime);
-        const P = new Map(); for (const r of R(T.PARAMS)) { try { P.set(String(r.Cle), JSON.parse(r.Valeur)); } catch (e) { P.set(String(r.Cle), { _illisible: String(r.Valeur) }); } }
+        const R = t => (rows[t] || []).filter(r => !r.Supprime && !String(r.Cle).startsWith('_sonde'));
+        const params = [...R(T.PARAMS), ...R(T.FICHIERS)];
+        const P = new Map(); for (const r of params) { try { P.set(String(r.Cle), JSON.parse(r.Valeur)); } catch (e) { P.set(String(r.Cle), { _illisible: String(r.Valeur) }); } }
         const structure = P.get('_structure') || {};
-        const parPrefixe = (pre) => trier(R(T.PARAMS)).filter(r => String(r.Cle).startsWith(pre + '|')).map(r => [String(r.Cle).slice(pre.length + 1), P.get(String(r.Cle))]);
+        const parPrefixe = (pre) => trier(params).filter(r => String(r.Cle).startsWith(pre + '|')).map(r => [String(r.Cle).slice(pre.length + 1), P.get(String(r.Cle))]);
         const db = {};
         const grouper = (lignes, champ, cles) => { const o = {}; for (const k of cles || []) o[k] = []; for (const r of lignes) { const k = (typeof r[champ] === 'string' && r[champ] !== '') ? r[champ] : '(sans nom)'; if (!has(o, k)) o[k] = []; o[k].push(r); } return o; };
 
@@ -348,10 +353,13 @@
             else if (section[k]) res[k] = section[k]();
             else { const o = {}; const cles = structure['objet|' + k]; const vals = new Map(parPrefixe(k)); for (const x of cles || []) if (vals.has(x)) o[x] = vals.get(x); for (const [x, v] of vals) if (!has(o, x)) o[x] = v; res[k] = o; }
         }
+        // Sans ligne « _structure » (document vide, ou tables remplies à la main), on ne fabrique pas de sections vides.
+        if (!Array.isArray(structure.racine)) { const creux = v => (Array.isArray(v) && !v.length) || (isObj(v) && Object.values(v).every(creux)); for (const k of Object.keys(res)) if (creux(res[k])) delete res[k]; }
         return res;
     }
 
-    const api = { T, SCHEMA, SENSIBLES, encode, decode, deepEqual, toRow, fromRow };
+    const TYPES = {}; for (const { table, colonnes } of SCHEMA) TYPES[table] = Object.fromEntries(colonnes);
+    const api = { T, SCHEMA, TYPES, SENSIBLES, encode, decode, deepEqual, toRow, fromRow, estVide };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.DnbTables = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -107,6 +107,7 @@ const projet = () => {
         if (rnd(3)) { d.oralConfig.distribution = dico(2); if (Array.isArray(d.oralConfig.students) && d.oralConfig.students.length) d.oralConfig.distribution['Jury 1'] = [{ type: 'x', students: [d.oralConfig.students[0]], startTime: '08:00' }, { students: d.oralConfig.students.slice(0, 2) }]; } }
     if (rnd(2)) { d.stage = { config: val(1) }; if (rnd(3)) d.stage.juries = liste(1); if (rnd(3)) d.stage.planning = liste(1); }
     if (Array.isArray(d.students) && d.students.length && rnd(2)) d.distribution = { 'Salle 1': d.students.slice(0, 2), 'Zone Tampon': [], 'S 2': [d.students[d.students.length - 1], val(1)] };
+    if (rnd(3) === 0) d.config = { logo: 'data:' + 'A'.repeat(20000 + rnd(9000)), nom: val(1) };
     return d;
 };
 let lignes = {};

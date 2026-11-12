@@ -1,7 +1,7 @@
 {
   "scripts": {
     "check": "for f in js/*.js; do node --check \"$f\" || exit 1; done",
-    "test": "npm run check && node test_smoke.js && node test_grist_store.js && node test_grist_bridge.js && node test_grist_tables.js"
+    "test": "npm run check && node test_smoke.js && node test_grist_store.js && node test_grist_bridge.js && node test_grist_tables.js && node test_grist_rows.js && node test_grist_bridge_tables.js"
   },
   "dependencies": {
     "jsdom": "^28.1.0"
