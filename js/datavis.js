@@ -1667,6 +1667,10 @@ document.addEventListener('mouseup', () => setTimeout(autoSave, 500)); // Click 
 
 // 4. Restauration au démarrage (LOGIQUE MISE À JOUR)
 window.addEventListener('load', function () {
+    // Dans Grist, la source de vérité est le document : la sauvegarde locale du navigateur est commune à tous les
+    // documents ouverts sur ce poste et peut être périmée. La restaurer publierait son contenu dans le document
+    // affiché (éventuellement un autre document). Le bouton n'est donc proposé que hors de Grist.
+    if (window !== window.parent) return;
     setTimeout(() => {
         const backup = localStorage.getItem('DNB_Manager_Current');
         if (backup) {

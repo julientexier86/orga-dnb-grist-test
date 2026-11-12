@@ -97,3 +97,29 @@ ajoute `user.Access != OWNER` -> `-S` ; un compte qui ne voit pas toutes les col
 
 Reste non prouvé : essai de bout en bout dans un document fictif avec le widget, deux vrais comptes, comportement
 de l'application réelle (et non du simulateur) lors d'un rechargement après fusion.
+
+## Essai réel du stockage par lignes sur l'instance (12/11/2026, 22 h 30)
+
+Code servi par GitHub Pages (v15), exécuté contre le document de laboratoire fictif par l'API de l'instance ;
+projet fictif de 80 élèves avec logo (250 Ko) et signature (340 Ko). Rôles éditeur et lecteur simulés (« voir en tant que »).
+
+| Essai | Résultat |
+|---|---|
+| Installation complète (15 tables, règles, sondes sur chaque table) | réussie, 22 s |
+| Premier envoi : 120 lignes en 2 requêtes | 1,5 s ; relecture exactement identique |
+| Relecture sans changement | 0,2 s (seule `DNB_Etat` est lue) |
+| Propriétaire et éditeur modifient deux élèves différents | les deux acceptés, 1 ligne chacun |
+| Même élève, colonnes différentes | second envoi refusé, fusion sans conflit, renvoi accepté |
+| Même cellule | refus, conflit identifié (table, clé, colonne) |
+| Saisie directe dans une table | relue par l'application |
+| Masquage lecteurs installé | protection par ligne toujours vérifiée et sondée |
+| Lecteur : lecture par l'application | refus propre (colonnes masquées détectées) ; INE, notes, aménagements absents de ses réponses |
+
+Non couvert par cet essai : l'application réelle dans le widget (bascule, rechargement après fusion), deux vrais comptes.
+
+## Sauvegarde locale du navigateur : risque constaté et corrigé
+
+La sauvegarde automatique locale (`localStorage`) est commune à tous les documents Grist ouverts sur un même poste.
+Le bouton « Restaurer la session » remplaçait le projet ouvert par cette copie, puis l'envoi automatique la publiait
+dans le document affiché : une copie périmée, ou celle d'un autre document, pouvait ainsi remplacer les données
+partagées. Le bouton n'est plus proposé quand l'application est embarquée dans Grist (`datavis.js`).

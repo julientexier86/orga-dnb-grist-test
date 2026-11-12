@@ -32,3 +32,11 @@ assert(
 );
 
 console.log('Smoke test OK: index.html est cohérent et les scripts locaux existent.');
+
+// Dans Grist (application embarquée), la restauration de la sauvegarde locale ne doit pas être proposée.
+{
+    const src = require('fs').readFileSync('js/datavis.js', 'utf8');
+    const i = src.indexOf("window.addEventListener('load'"), j = src.indexOf("localStorage.getItem('DNB_Manager_Current')", i);
+    if (i < 0 || j < 0 || !src.slice(i, j).includes('if (window !== window.parent) return;')) { console.error('Garde « hors Grist » absente avant la restauration locale'); process.exit(1); }
+    console.log('Restauration locale désactivée dans Grist : OK');
+}
