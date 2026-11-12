@@ -1,101 +1,167 @@
-/* Connexion expérimentale Grist : sauvegardes complètes, explicites et ajoutées sans écrasement. */
+/* Pont Orga Exam ↔ Grist : stockage versionné par sections (voir grist_store.js).
+ * Règles de sûreté :
+ *  - aucune écriture tant que la règle de version n'est pas vérifiée dans le document ;
+ *  - jamais de remplacement silencieux : charger ou écraser demande toujours une action explicite ;
+ *  - une écriture refusée laisse les données locales intactes ;
+ *  - seules MES sections modifiées sont publiées : une section modifiée par un autre n'est jamais écrasée sans choix. */
 (function () {
-    if (window === window.parent) return;
-    const TABLE = 'OrgaExamSauvegardes';
-    const apiScript = document.createElement('script');
-    apiScript.src = 'https://docs.getgrist.com/grist-plugin-api.js';
-    apiScript.onload = () => {
-        const grist = window.grist;
-        grist.ready({ requiredAccess: 'full' });
-        const blankProject = JSON.parse(JSON.stringify(DB));
-        let baseline = null;
-        let connected = new URLSearchParams(window.location.search).get('access') === 'full';
-        const box = document.createElement('div');
-        box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:9000;background:white;color:#20314a;border:1px solid #b7c5d4;border-radius:8px;padding:12px;box-shadow:0 4px 18px #0002;font:14px sans-serif;max-width:340px';
-        box.innerHTML = '<strong>Grist — expérimental</strong><p data-status>En attente de l’autorisation Grist…</p><button data-save disabled>Enregistrer dans Grist</button> <button data-load disabled>Charger depuis Grist</button><p><button data-schema disabled>Créer les tables de démonstration</button> <button data-read disabled>Charger les tables de test</button> <button data-write disabled>Enregistrer modifications test</button></p><p style="font-size:12px">Sauvegardes complètes manuelles. Les utilisateurs doivent coordonner leurs modifications.</p>';
-        document.body.appendChild(box);
-        const status = box.querySelector('[data-status]');
-        const save = box.querySelector('[data-save]');
-        const load = box.querySelector('[data-load]');
-        const schema = box.querySelector('[data-schema]');
-        const read = box.querySelector('[data-read]');
-        const write = box.querySelector('[data-write]');
-        function setStatus(message) { status.textContent = message; }
-        save.disabled = load.disabled = schema.disabled = read.disabled = !connected;
-        if (connected) setStatus('Accès demandé. Les données restent locales jusqu’à un enregistrement manuel.');
-        grist.onOptions((options, interaction) => {
-            connected = new URLSearchParams(window.location.search).get('access') === 'full' || (interaction && (interaction.accessLevel || interaction.access_level) === 'full');
-            save.disabled = load.disabled = schema.disabled = read.disabled = !connected;
-            setStatus(connected ? 'Connecté. Les données restent locales jusqu’à un enregistrement manuel.' : 'Autorise l’accès complet au document de test dans Grist.');
-        });
-        async function rows() {
-            try { return await grist.docApi.fetchTable(TABLE); }
-            catch (e) { throw new Error('Table OrgaExamSauvegardes inaccessible. Crée-la avec les colonnes Date_UTC, Libelle et Donnees_JSON (texte). ' + e.message); }
+    if (window === window.parent) return;               // uniquement quand l'application est embarquée dans Grist
+    const Store = window.DnbStore;
+    if (!Store) { console.error('grist_store.js manquant'); return; }
+    const POLL_MS = 60000, DELAI_ENVOI_MS = 3000;
+    const st = { mode: 'init', msg: '', baseline: {}, conflits: [], distant: [], verifiable: true, occupe: false, timer: null, chargement: false, ok: false };
+    let grist, store;
+
+    const esc = s => (typeof escapeHTML === 'function' ? escapeHTML(s) : String(s));
+    const sections = () => Store.splitDb(JSON.parse(JSON.stringify(DB)));
+    const heure = d => new Date(d || Date.now()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const auteur = () => { try { return localStorage.getItem('DNB_Auteur') || ''; } catch (e) { return ''; } };
+    const erreur = e => setMode('erreur', 'Erreur : ' + (e && e.message || e));
+
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:9000;background:#fff;color:#20314a;border:1px solid #b7c5d4;border-radius:8px;padding:10px 12px;box-shadow:0 4px 18px #0002;font:13px sans-serif;max-width:360px';
+    document.body.appendChild(box);
+
+    function bouton(label, fn, primaire) {
+        const b = document.createElement('button');
+        b.textContent = label;
+        b.style.cssText = 'margin:4px 6px 0 0;padding:5px 9px;border-radius:6px;border:1px solid #9fb0c3;cursor:pointer;background:' + (primaire ? '#1f3a5c;color:#fff' : '#f4f6f8');
+        b.onclick = async () => { b.disabled = true; try { await fn(); } catch (e) { erreur(e); } finally { b.disabled = false; } };
+        return b;
+    }
+    const TITRES = { sync: 'synchronisé', conflit: 'conflit', erreur: 'erreur', nonprotege: 'stockage non protégé', absent: 'stockage à initialiser', local: 'projet local (non synchronisé)', vide: 'Grist vide', init: 'connexion…' };
+    const COULEURS = { sync: '#2f6f5e', conflit: '#9a4a2e', erreur: '#9a4a2e', nonprotege: '#9a4a2e', absent: '#9a7a2e', local: '#9a7a2e', vide: '#9a7a2e', init: '#656d70' };
+
+    function setMode(mode, msg) {
+        st.mode = mode; st.msg = msg || '';
+        box.innerHTML = '<strong style="color:' + COULEURS[mode] + '">Grist — ' + esc(TITRES[mode] || mode) + '</strong><div data-m style="margin:4px 0"></div><div data-b></div><div data-n style="margin-top:6px;font-size:12px"></div>';
+        box.querySelector('[data-m]').textContent = st.msg;
+        const zone = box.querySelector('[data-b]');
+        const ajoute = (l, f, p) => zone.appendChild(bouton(l, f, p));
+        if (mode === 'absent' || mode === 'nonprotege') {
+            ajoute('Initialiser / vérifier le stockage (propriétaire)', installer, true);
+            if (mode === 'nonprotege' && !st.verifiable) ajoute('J’ai vérifié la règle dans Grist', () => { st.ok = true; return demarrer(); });
         }
-        read.onclick = async () => {
-            try {
-                const before = await window.getDnbCoreSnapshot(grist.docApi);
-                const candidate = await window.readDnbStructuredSession(grist.docApi, blankProject);
-                const after = await window.getDnbCoreSnapshot(grist.docApi);
-                if (JSON.stringify(before)!==JSON.stringify(after)) throw new Error('Les données ont changé pendant la lecture ; réessaie.');
-                showConfirm('Charger les élèves, salles, enseignants et affectations des tables Grist ? Cela remplace le projet ouvert dans l’application. Les autres modules repartent vides.', () => {
-                    baseline = null; write.disabled = true;
-                    loadGlobalData(new File([JSON.stringify(candidate)], 'tables-grist.data', {type:'application/json'}), () => {
-                        baseline = after; write.disabled = false;
-                        setStatus('Tables chargées. Écriture limitée aux élèves, salles, enseignants et affectations existants.');
-                    });
-                });
-            } catch (e) { setStatus('Lecture impossible : ' + e.message); }
-        };
-        write.onclick = async () => {
-            if (!baseline) return;
-            write.disabled = true;
-            try {
-                const now = await window.getDnbCoreSnapshot(grist.docApi);
-                if (JSON.stringify(now)!==JSON.stringify(baseline)) throw new Error('Les tables ont changé depuis le chargement : recharge-les avant de continuer.');
-                const actions = window.buildDnbCoreUpdates(now, DB);
-                await grist.docApi.applyUserActions(actions);
-                baseline = await window.getDnbCoreSnapshot(grist.docApi);
-                setStatus('Élèves, salles, enseignants et affectations existants enregistrés. Autres modules non transmis.');
-            } catch(e) { setStatus('Écriture refusée : ' + e.message); }
-            finally { write.disabled = !baseline; }
-        };
-        schema.onclick = async () => {
-            schema.disabled = true;
-            try { const n = await window.createDnbDemoSchema(grist.docApi); setStatus(n + ' tables créées avec des exemples fictifs.'); }
-            catch (e) { setStatus('Création impossible : ' + e.message); }
-            finally { schema.disabled = read.disabled = !connected; }
-        };
-        save.onclick = async () => {
-            save.disabled = load.disabled = true;
-            try {
-                await rows();
-                const now = new Date().toISOString();
-                await grist.docApi.applyUserActions([['AddRecord', TABLE, null, {
-                    Date_UTC: now, Libelle: (DB.config && DB.config.year || '') + ' — sauvegarde manuelle', Donnees_JSON: JSON.stringify(DB)
-                }]]);
-                setStatus('Sauvegarde ajoutée à Grist : ' + new Date(now).toLocaleString('fr-FR'));
-            } catch (e) { setStatus('Échec : ' + e.message); }
-            finally { save.disabled = load.disabled = schema.disabled = read.disabled = !connected; }
-        };
-        load.onclick = async () => {
-            save.disabled = load.disabled = true;
-            try {
-                const t = await rows();
-                if (!t.id.length) throw new Error('Aucune sauvegarde dans Grist.');
-                const i = t.id.reduce((best, id, idx) => id > t.id[best] ? idx : best, 0);
-                const json = t.Donnees_JSON[i];
-                const data = JSON.parse(json);
-                if (!data || !data.config || !Array.isArray(data.students) || !Array.isArray(data.rooms) || !Array.isArray(data.teachers)) throw new Error('Sauvegarde invalide.');
-                showConfirm('Charger la sauvegarde Grist du ' + (t.Date_UTC[i] || 'date inconnue') + ' ? Les données actuellement ouvertes dans l’application seront remplacées. Exporte-les avant si nécessaire.', () => {
-                    baseline = null; write.disabled = true;
-                    loadGlobalData(new File([json], 'sauvegarde-grist.data', { type: 'application/json' }));
-                    setStatus('Chargement demandé depuis Grist.');
-                });
-            } catch (e) { setStatus('Échec : ' + e.message); }
-            finally { save.disabled = load.disabled = schema.disabled = read.disabled = !connected; }
-        };
+        if (mode === 'vide') ajoute('Publier le projet local dans Grist', publierTout, true);
+        if (mode === 'local') { ajoute('Charger depuis Grist', () => chargerDistant(null), true); ajoute('Publier (remplace Grist)', confirmerPublication); }
+        if (mode === 'sync') {
+            ajoute('Enregistrer maintenant', () => envoyer(), true);
+            if (st.distant.length) ajoute('Charger ' + st.distant.length + ' section(s) modifiée(s) par un autre', () => chargerDistant(st.distant), true);
+        }
+        if (mode === 'conflit') { ajoute('Prendre leur version', () => chargerDistant(st.conflits), true); ajoute('Garder la mienne', garderLaMienne); }
+        if (mode === 'sync' || mode === 'conflit') {
+            const n = box.querySelector('[data-n]'), i = document.createElement('input');
+            i.placeholder = 'Votre nom (journal des modifications)'; i.value = auteur(); i.style.cssText = 'width:100%;box-sizing:border-box;padding:3px 6px';
+            i.onchange = () => { try { localStorage.setItem('DNB_Auteur', i.value.trim()); } catch (e) { /* ignoré */ } };
+            n.appendChild(i);
+        }
+    }
+
+    async function installer() {
+        const res = await Store.installProtection(grist.docApi);
+        st.ok = true; await demarrer(); box.querySelector('[data-m]').textContent += ' (règle ' + res.regle + ')';
+    }
+
+    async function demarrer() {
+        const noms = (await grist.docApi.listTables()).map(t => (typeof t === 'string' ? t : t.id));
+        if (!noms.includes(Store.T_SECTIONS) || !noms.includes(Store.T_MORCEAUX)) return setMode('absent', 'Les tables de stockage n’existent pas dans ce document.');
+        const prot = await Store.verifyProtection(grist.docApi);
+        st.verifiable = prot.verifiable;
+        if (!prot.ok && !st.ok) return setMode('nonprotege', prot.raison + '. Aucune écriture n’est faite tant que la protection contre les écrasements n’est pas en place.');
+        const lu = await store.pull();
+        st.baseline = lu.baseline;
+        if (lu.problems.length) return setMode('erreur', 'Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', ') + '. Aucune écriture automatique.');
+        if (!Object.keys(lu.sections).length) return setMode('vide', 'Aucun projet dans ce document Grist. Le projet local n’est pas envoyé automatiquement.');
+        if (!(DB.students && DB.students.length) && !(DB.rooms && DB.rooms.length)) return chargerDistant(null);
+        const dernier = Object.values(lu.meta).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || {};
+        setMode('local', 'Un projet existe dans Grist et un projet local est ouvert : choisissez.');
+        showConfirm('Un projet existe dans Grist.\nDernière publication : ' + esc(dernier.auteur || 'auteur inconnu') + ', ' + esc(dernier.date || 'date inconnue') + '.\nLe charger remplace le projet ouvert dans l’application (exportez-le avant si besoin).',
+            () => chargerDistant(null).catch(erreur), () => setMode('local', 'Le projet local n’est pas synchronisé : rien n’est envoyé à Grist.'));
+    }
+
+    /** cles = null : tout le projet est remplacé par celui de Grist ; sinon seules ces sections, le reste local est conservé. */
+    async function chargerDistant(cles) {
+        const lu = await store.pull();
+        if (lu.problems.length) throw new Error('Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', '));
+        const cibles = cles || Object.keys(lu.sections);
+        const local = cles ? sections() : {};
+        for (const k of cibles) if (k in lu.sections) local[k] = lu.sections[k];
+        const base = cles ? Object.assign({}, st.baseline) : {};
+        for (const k of cibles) if (lu.baseline[k]) base[k] = lu.baseline[k];
+        st.chargement = true; clearTimeout(st.timer); st.timer = null;
+        try { await new Promise(res => loadGlobalData(new File([JSON.stringify(Store.joinDb(local))], 'grist.data', { type: 'application/json' }), res)); }
+        finally { st.chargement = false; }
+        st.baseline = base; st.conflits = st.conflits.filter(k => !cibles.includes(k)); st.distant = st.distant.filter(k => !cibles.includes(k));
+        setMode('sync', 'Chargé depuis Grist à ' + heure() + '.');
+    }
+
+    function confirmerPublication() {
+        showConfirm('Publier le projet local dans Grist ?\nCela crée une nouvelle révision de chaque section modifiée ; les révisions précédentes restent restaurables (3 conservées).', () => publierTout().catch(erreur));
+    }
+    async function publierTout() {
+        const lu = await store.pull();
+        const r = await store.push(sections(), lu.baseline);
+        if (!r.committed) return signalerRefus(r);
+        st.baseline = r.baseline; st.distant = []; st.conflits = [];
+        setMode('sync', 'Projet publié dans Grist à ' + heure() + ' (' + r.saved.length + ' section(s)).');
+    }
+
+    function signalerRefus(r) {
+        if (r.refused) return setMode('erreur', 'Grist a refusé l’écriture (droits insuffisants ou règle mal posée). Vos données locales sont intactes.');
+        st.conflits = r.conflicts;
+        setMode('conflit', 'Modifié par un autre utilisateur : ' + r.conflicts.join(', ') + '. Vos modifications restent locales, rien n’a été écrasé.');
+    }
+
+    async function envoyer() {
+        if (st.occupe || st.mode !== 'sync') return;
+        st.occupe = true;
+        try {
+            const r = await store.push(sections(), st.baseline);
+            if (!r.committed) return signalerRefus(r);
+            st.baseline = r.baseline; st.timer = null;
+            if (r.saved.length) { st.distant = st.distant.filter(k => !r.saved.includes(k)); setMode('sync', 'Enregistré dans Grist à ' + heure() + ' (' + r.saved.join(', ') + ').'); }
+        } finally { st.occupe = false; }
+    }
+
+    async function garderLaMienne() {
+        const mes = await store.changedKeys(sections(), st.baseline);   // uniquement ce que j'ai moi-même modifié
+        const frais = await store.pull();
+        const r = await store.push(sections(), frais.baseline, { seulement: mes });
+        if (!r.committed) return signalerRefus(r);
+        const base = Object.assign({}, st.baseline);
+        for (const k of mes) base[k] = r.baseline[k];                    // les autres sections gardent leur ancienne référence
+        st.baseline = base; st.conflits = [];
+        setMode('sync', 'Vos modifications ont été publiées à ' + heure() + ' (' + mes.join(', ') + ').');
+        await verifierDistant();
+    }
+
+    async function verifierDistant() {
+        if (st.mode !== 'sync' && st.mode !== 'conflit') return;
+        const rev = await store.revisions();
+        const nouveaux = Object.keys(rev).filter(k => rev[k].revision > ((st.baseline[k] || {}).revision || 0) && !st.conflits.includes(k));
+        if (nouveaux.join() === st.distant.join()) return;
+        st.distant = nouveaux;
+        if (st.mode === 'sync') setMode('sync', nouveaux.length ? 'Modifications disponibles de ' + [...new Set(nouveaux.map(k => rev[k].auteur || 'un autre utilisateur'))].join(', ') + '.' : st.msg);
+    }
+
+    function programmerEnvoi() {
+        if (st.chargement || st.mode !== 'sync') return;
+        clearTimeout(st.timer);
+        st.timer = setTimeout(() => envoyer().catch(erreur), DELAI_ENVOI_MS);
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://grist.numerique.gouv.fr/grist-plugin-api.js';
+    script.onload = () => {
+        grist = window.grist; grist.ready({ requiredAccess: 'full' });
+        store = Store.createStore(grist.docApi, { auteur });
+        const original = window.autoSave;
+        if (typeof original === 'function') window.autoSave = function () { const r = original.apply(this, arguments); programmerEnvoi(); return r; };
+        window.addEventListener('beforeunload', e => { if (st.timer && st.mode === 'sync') { e.preventDefault(); e.returnValue = ''; } });
+        setInterval(() => { if (!document.hidden) verifierDistant().catch(() => {}); }, POLL_MS);
+        setMode('init', 'Vérification du stockage…');
+        demarrer().catch(erreur);
     };
-    apiScript.onerror = () => console.error('Impossible de charger l’API des widgets Grist.');
-    document.head.appendChild(apiScript);
+    script.onerror = () => setMode('erreur', 'Impossible de charger l’API des widgets Grist.');
+    document.head.appendChild(script);
 })();
