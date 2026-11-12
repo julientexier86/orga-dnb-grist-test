@@ -32,6 +32,7 @@
     const TITRES = { sync: 'synchronisé', conflit: 'conflit', erreur: 'erreur', nonprotege: 'stockage non protégé', absent: 'stockage à initialiser', local: 'projet local (non synchronisé)', illisible: 'section(s) illisible(s)', vide: 'Grist vide', init: 'connexion…' };
     const COULEURS = { sync: '#2f6f5e', conflit: '#9a4a2e', erreur: '#9a4a2e', nonprotege: '#9a4a2e', absent: '#9a7a2e', local: '#9a7a2e', illisible: '#9a4a2e', vide: '#9a7a2e', init: '#656d70' };
 
+    const etape = t => { const m = box.querySelector('[data-m]'); if (m) m.textContent = t; };
     function setMode(mode, msg) {
         st.mode = mode; st.msg = msg || '';
         box.innerHTML = '<strong style="color:' + COULEURS[mode] + '">Grist — ' + esc(TITRES[mode] || mode) + '</strong><div data-m style="margin:4px 0"></div><div data-b></div><div data-n style="margin-top:6px;font-size:12px"></div>';
@@ -82,7 +83,9 @@
 
     /** cles = null : tout le projet est remplacé par celui de Grist ; sinon seules ces sections, le reste local est conservé. */
     async function chargerDistant(cles, ignorerProblemes) {
+        etape('Lecture de Grist…');
         const lu = await store.pull();
+        etape('Chargement dans l’application…');
         if (lu.problems.length && !ignorerProblemes) throw new Error('Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', '));
         const cibles = cles || Object.keys(lu.sections);
         const local = (cles || ignorerProblemes) ? sections() : {};   // chargement partiel : les sections absentes de Grist gardent leur valeur locale (sinon l'application plante)
@@ -90,7 +93,12 @@
         const base = cles ? Object.assign({}, st.baseline) : {};
         for (const k of cibles) if (lu.baseline[k]) base[k] = lu.baseline[k];
         st.chargement = true; clearTimeout(st.timer); st.timer = null;
-        try { await new Promise(res => loadGlobalData(new File([JSON.stringify(Store.joinDb(local))], 'grist.data', { type: 'application/json' }), res)); }
+        try {
+            await new Promise((res, rej) => {
+                const delai = setTimeout(() => rej(new Error('L’application n’a pas terminé le chargement (aucune réponse après 20 s).')), 20000);
+                loadGlobalData(new File([JSON.stringify(Store.joinDb(local))], 'grist.data', { type: 'application/json' }), () => { clearTimeout(delai); res(); });
+            });
+        }
         finally { st.chargement = false; }
         st.baseline = base; st.conflits = st.conflits.filter(k => !cibles.includes(k)); st.distant = st.distant.filter(k => !cibles.includes(k));
         setMode('sync', 'Chargé depuis Grist à ' + heure() + '.');
