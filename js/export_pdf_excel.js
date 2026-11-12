@@ -948,8 +948,8 @@ function checkSaveStatus() {
     setTimeout(updateSaveButtonStatus, SAVE_ALERT_DELAY + 1000);
 }
 
-function loadGlobalData() {
-    const f = document.getElementById('loadInput').files[0];
+function loadGlobalData(file) {
+    const f = file instanceof File ? file : document.getElementById('loadInput').files[0];
     if (!f) return;
     const r = new FileReader();
     r.onload = e => {
