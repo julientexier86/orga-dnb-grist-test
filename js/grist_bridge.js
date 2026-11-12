@@ -7,7 +7,7 @@
     apiScript.onload = () => {
         const grist = window.grist;
         grist.ready({ requiredAccess: 'full' });
-        let connected = false;
+        let connected = new URLSearchParams(window.location.search).get('access') === 'full';
         const box = document.createElement('div');
         box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:9000;background:white;color:#20314a;border:1px solid #b7c5d4;border-radius:8px;padding:12px;box-shadow:0 4px 18px #0002;font:14px sans-serif;max-width:340px';
         box.innerHTML = '<strong>Grist — expérimental</strong><p data-status>En attente de l’autorisation Grist…</p><button data-save disabled>Enregistrer dans Grist</button> <button data-load disabled>Charger depuis Grist</button><p style="font-size:12px">Sauvegardes complètes manuelles. Les utilisateurs doivent coordonner leurs modifications.</p>';
@@ -16,6 +16,8 @@
         const save = box.querySelector('[data-save]');
         const load = box.querySelector('[data-load]');
         function setStatus(message) { status.textContent = message; }
+        save.disabled = load.disabled = !connected;
+        if (connected) setStatus('Accès demandé. Les données restent locales jusqu’à un enregistrement manuel.');
         grist.onOptions((options, interaction) => {
             connected = new URLSearchParams(window.location.search).get('access') === 'full' || (interaction && (interaction.accessLevel || interaction.access_level) === 'full');
             save.disabled = load.disabled = !connected;
