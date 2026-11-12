@@ -39,9 +39,11 @@
                 const after = await window.getDnbCoreSnapshot(grist.docApi);
                 if (JSON.stringify(before)!==JSON.stringify(after)) throw new Error('Les données ont changé pendant la lecture ; réessaie.');
                 showConfirm('Charger les élèves, salles, enseignants et affectations des tables Grist ? Cela remplace le projet ouvert dans l’application. Les autres modules repartent vides.', () => {
-                    baseline = after; write.disabled = false;
-                    loadGlobalData(new File([JSON.stringify(candidate)], 'tables-grist.data', {type:'application/json'}));
-                    setStatus('Tables chargées. Écriture limitée aux élèves, salles, enseignants et affectations existants.');
+                    baseline = null; write.disabled = true;
+                    loadGlobalData(new File([JSON.stringify(candidate)], 'tables-grist.data', {type:'application/json'}), () => {
+                        baseline = after; write.disabled = false;
+                        setStatus('Tables chargées. Écriture limitée aux élèves, salles, enseignants et affectations existants.');
+                    });
                 });
             } catch (e) { setStatus('Lecture impossible : ' + e.message); }
         };

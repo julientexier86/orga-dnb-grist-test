@@ -948,7 +948,7 @@ function checkSaveStatus() {
     setTimeout(updateSaveButtonStatus, SAVE_ALERT_DELAY + 1000);
 }
 
-function loadGlobalData(file) {
+function loadGlobalData(file, onLoaded) {
     const f = file instanceof File ? file : document.getElementById('loadInput').files[0];
     if (!f) return;
     const r = new FileReader();
@@ -1129,6 +1129,7 @@ function loadGlobalData(file) {
             // --------------------------------------------------
 
             showToast("Données chargées et sécurisées !", 'success');
+            if (typeof onLoaded === 'function') onLoaded();
         } catch (err) {
             console.error(err);
             showAlertModal("Erreur lors du chargement : " + err.message, 'error');
