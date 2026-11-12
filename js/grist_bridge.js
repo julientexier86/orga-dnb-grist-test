@@ -17,7 +17,7 @@
         const load = box.querySelector('[data-load]');
         function setStatus(message) { status.textContent = message; }
         grist.onOptions((options, interaction) => {
-            connected = interaction && interaction.access_level === 'full';
+            connected = interaction && (interaction.accessLevel || interaction.access_level) === 'full';
             save.disabled = load.disabled = !connected;
             setStatus(connected ? 'Connecté. Les données restent locales jusqu’à un enregistrement manuel.' : 'Autorise l’accès complet au document de test dans Grist.');
         });

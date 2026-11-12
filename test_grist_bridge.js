@@ -15,7 +15,7 @@ const fs = require('node:fs');
   w.loadGlobalData = f => {loaded=f;};
   w.eval(fs.readFileSync('js/grist_bridge.js','utf8'));
   w.document.querySelector('script').onload();
-  optionHandler({}, {access_level:'full'});
+  optionHandler({}, {accessLevel:'full'});
   const buttons=w.document.querySelectorAll('button');
   buttons[0].click();
   await new Promise(resolve=>setTimeout(resolve,0));
