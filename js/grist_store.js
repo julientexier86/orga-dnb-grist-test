@@ -87,6 +87,11 @@
                     out.sections[cle] = JSON.parse(text);
                 }
                 if (!out.problems.length) return out;
+                // Une section illisible n'est relue que si une publication est survenue pendant la lecture (relecture légère
+                // de la table des sections) ; sinon la corruption est stable et inutile à retélécharger.
+                const apres = await readSectionRows();
+                const bouge = [...secs].some(([c, r]) => { const a = apres.get(c); return !a || a.Revision !== r.Revision || a.Nonce !== r.Nonce; }) || apres.size !== secs.size;
+                if (!bouge) return out;
             }
             return out;
         }
@@ -140,7 +145,7 @@
                 const rev = baseline[k].revision + 1, n = nonces[k] = nonce();
                 const parts = chunk(texts[k]);
                 for (let i = 0; i < parts.length; i++) {
-                    const action = ['AddRecord', T_MORCEAUX, null, { Cle_section: k, Revision_cible: rev, Nonce: n, Ordre: i, Contenu: parts[i], Hash: '' }];
+                    const action = ['AddRecord', T_MORCEAUX, null, { Cle_section: k, Revision_cible: rev, Nonce: n, Ordre: i, Contenu: parts[i], Hash: hashes[k] }];
                     const size = octets(action);
                     if (batch.length && bytes + size > OCTETS_PAR_REQUETE) await flush();
                     batch.push(action);
@@ -184,21 +189,50 @@
             return del.length;
         }
 
-        /** Restaure une révision antérieure comme NOUVELLE révision (l'historique n'est jamais réécrit). */
-        async function restore(key, revision, baseline) {
+        /** Révisions restaurables d'une section (écritures abouties, hors écrivains battus et écritures en cours). */
+        async function history(key) {
+            const s = (await readSectionRows()).get(key);
+            const groupes = new Map();
+            for (const m of rowsOf(await api.fetchTable(T_MORCEAUX))) {
+                if (m.Cle_section !== key) continue;
+                const id = m.Revision_cible + '|' + m.Nonce;
+                const g = groupes.get(id) || { revision: m.Revision_cible, nonce: m.Nonce, ordres: [], taille: 0, hash: m.Hash || '' };
+                g.ordres.push(m.Ordre); g.taille += (m.Contenu || '').length; groupes.set(id, g);
+            }
+            const out = [];
+            for (const g of groupes.values()) {
+                if (s && (g.revision > s.Revision || (g.revision === s.Revision && g.nonce !== s.Nonce))) continue;
+                const o = g.ordres.sort((a, b) => a - b);
+                const courante = !!s && g.revision === s.Revision && g.nonce === s.Nonce;
+                out.push({ revision: g.revision, nonce: g.nonce, nbMorceaux: o.length, taille: g.taille, courante,
+                    complet: o.every((x, i) => x === i) && (!courante || o.length === s.NbMorceaux), verifiable: !!g.hash });
+            }
+            return out.sort((a, b) => b.revision - a.revision);
+        }
+
+        /** Restaure une révision antérieure comme NOUVELLE révision (l'historique n'est jamais réécrit).
+         *  Le contenu est vérifié (complétude, empreinte quand elle est connue) avant toute écriture. */
+        async function restore(key, revision, baseline, nonceVoulu) {
             const secs = await readSectionRows();
             const morceaux = rowsOf(await api.fetchTable(T_MORCEAUX));
-            const candidates = morceaux.filter(m => m.Cle_section === key && m.Revision_cible === revision);
+            const candidates = morceaux.filter(m => m.Cle_section === key && m.Revision_cible === revision && (!nonceVoulu || m.Nonce === nonceVoulu));
             if (!candidates.length) throw new Error('Révision introuvable ou purgée.');
             // Si deux écrivains ont écrit cette révision, on ne sait pas lequel a gagné : refus plutôt que deviner.
             if (new Set(candidates.map(m => m.Nonce)).size > 1) throw new Error('Révision ambiguë (écritures concurrentes) : restauration refusée.');
-            const n = candidates[0].Nonce;
-            const text = candidates.filter(m => m.Nonce === n).sort((a, b) => a.Ordre - b.Ordre).map(m => m.Contenu).join('');
+            const parts = candidates.sort((a, b) => a.Ordre - b.Ordre);
+            if (parts.some((p, i) => p.Ordre !== i)) throw new Error('Révision incomplète : restauration refusée.');
+            const text = parts.map(m => m.Contenu).join('');
+            if (parts[0].Hash && (await sha256(text)) !== parts[0].Hash) throw new Error('Révision altérée (empreinte différente) : restauration refusée.');
             const value = JSON.parse(text);
-            return push({ [key]: value }, baseline);
+            if (!baseline) {
+                const cur = secs.get(key);
+                if (!cur) throw new Error('Section inconnue : ' + key);
+                baseline = { [key]: { id: cur.id, revision: cur.Revision || 0, hash: '', nonce: cur.Nonce } };
+            }
+            return push({ [key]: value }, baseline, { seulement: [key] });
         }
 
-        return { pull, push, changedKeys, revisions, ensureSections, garbageCollect, restore };
+        return { pull, push, changedKeys, revisions, ensureSections, garbageCollect, restore, history };
     }
 
     /* Découpage de la base de l'application en sections. Chaque clé racine est une section ; les deux images

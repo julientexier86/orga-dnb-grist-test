@@ -130,6 +130,28 @@ const grandProjet = () => ({ config: { schoolName: 'Collège fictif', year: '202
         w2.eval('confirms[0].ok()'); await until(() => /synchronisé/.test(titre(w2)), 'réparé');
         assert.equal((await Store.createStore(g.client(), { auteur: 'V' }).pull()).problems.length, 0, 'plus aucune section illisible');
     }
-    console.log('Pont Grist : protection exigée, publication explicite, envoi automatique, conflits, rechargement partiel, droits, sections illisibles OK');
+    // 11. Restauration depuis l'interface : section illisible dont une révision antérieure est saine
+    {
+        const g = fakeGrist(); await Store.installProtection(g.client());
+        const seed = Store.createStore(g.client(), { auteur: 'Seed' });
+        const p1 = grandProjet(); let base = (await seed.push(Store.splitDb(p1), {})).baseline;
+        const p2 = grandProjet(); p2.rooms = [{ id: 'R1', nom: 'Salle 1' }, { id: 'R2', nom: 'Salle 2' }];
+        assert.ok((await seed.push(Store.splitDb(p2), base)).committed);                       // rooms : révision 2 (2 salles)
+        const ch = g.tables.DNB_Morceaux.find(m => m.Cle_section === 'rooms' && m.Revision_cible === 2); ch.Contenu += 'X';   // révision courante abîmée
+        const w = lancer(faux(g), grandProjet());
+        await until(() => /illisible/.test(titre(w)), 'mode illisible');
+        clic(w, 'Restaurer une version'); await until(() => /historique/.test(titre(w)), 'écran historique');
+        const lignes = boutons(w); assert.ok(lignes.some(b => /Révision 1/.test(b)) && lignes.some(b => /Révision 2 \(actuelle\)/.test(b)), 'révisions listées : ' + lignes);
+        assert.ok([...w.document.querySelectorAll('button')].find(b => /Révision 2/.test(b.textContent)).disabled, 'la révision courante n’est pas restaurable');
+        const avant = g.log.length;
+        clic(w, 'Révision 1'); await until(() => w.eval('confirms.length') >= 1, 'confirmation demandée');
+        assert.equal(g.log.length, avant, 'rien n’est écrit avant confirmation');
+        w.eval('confirms[confirms.length-1].ok()');
+        await until(() => /synchronisé/.test(titre(w)), 'restauré');
+        assert.equal(w.eval('DB.rooms.length'), 1, 'la version 1 (1 salle) est chargée dans l’application');
+        assert.equal((await Store.createStore(g.client(), { auteur: 'V' }).pull()).problems.length, 0, 'section réparée');
+        assert.equal(g.tables.DNB_Sections.find(s => s.Cle === 'rooms').Revision, 3, 'restauration = nouvelle révision');
+    }
+    console.log('Pont Grist : protection exigée, publication explicite, envoi automatique, conflits, rechargement partiel, droits, sections illisibles, restauration OK');
     process.exit(0); // le pont programme une vérification périodique : on quitte explicitement
 })().catch(e => { console.error(e); process.exit(1); });

@@ -9,7 +9,7 @@
     const Store = window.DnbStore;
     if (!Store) { console.error('grist_store.js manquant'); return; }
     const POLL_MS = 60000, DELAI_ENVOI_MS = 3000;
-    const st = { mode: 'init', msg: '', baseline: {}, conflits: [], distant: [], verifiable: true, occupe: false, timer: null, chargement: false, ok: false };
+    const st = { mode: 'init', msg: '', baseline: {}, conflits: [], distant: [], verifiable: true, occupe: false, timer: null, chargement: false, ok: false, illisibles: [] };
     let grist, store;
 
     const esc = s => (typeof escapeHTML === 'function' ? escapeHTML(s) : String(s));
@@ -29,8 +29,8 @@
         b.onclick = async () => { b.disabled = true; try { await fn(); } catch (e) { erreur(e); } finally { b.disabled = false; } };
         return b;
     }
-    const TITRES = { sync: 'synchronisé', conflit: 'conflit', erreur: 'erreur', nonprotege: 'stockage non protégé', absent: 'stockage à initialiser', local: 'projet local (non synchronisé)', illisible: 'section(s) illisible(s)', vide: 'Grist vide', init: 'connexion…' };
-    const COULEURS = { sync: '#2f6f5e', conflit: '#9a4a2e', erreur: '#9a4a2e', nonprotege: '#9a4a2e', absent: '#9a7a2e', local: '#9a7a2e', illisible: '#9a4a2e', vide: '#9a7a2e', init: '#656d70' };
+    const TITRES = { historique: 'historique', sync: 'synchronisé', conflit: 'conflit', erreur: 'erreur', nonprotege: 'stockage non protégé', absent: 'stockage à initialiser', local: 'projet local (non synchronisé)', illisible: 'section(s) illisible(s)', vide: 'Grist vide', init: 'connexion…' };
+    const COULEURS = { historique: '#20314a', sync: '#2f6f5e', conflit: '#9a4a2e', erreur: '#9a4a2e', nonprotege: '#9a4a2e', absent: '#9a7a2e', local: '#9a7a2e', illisible: '#9a4a2e', vide: '#9a7a2e', init: '#656d70' };
 
     const etape = t => { const m = box.querySelector('[data-m]'); if (m) m.textContent = t; };
     function setMode(mode, msg) {
@@ -43,11 +43,12 @@
             ajoute('Initialiser / vérifier le stockage (propriétaire)', installer, true);
             if (mode === 'nonprotege' && !st.verifiable) ajoute('J’ai vérifié la règle dans Grist', () => { st.ok = true; return demarrer(); });
         }
-        if (mode === 'illisible') { ajoute('Charger les sections lisibles', () => chargerDistant(null, true), true); ajoute('Publier le projet local (répare)', confirmerPublication); }
+        if (mode === 'illisible') { ajoute('Charger les sections lisibles', () => chargerDistant(null, true), true); ajoute('Restaurer une version…', () => historique(st.illisibles[0]), true); ajoute('Publier le projet local (répare)', confirmerPublication); }
         if (mode === 'vide') ajoute('Publier le projet local dans Grist', publierTout, true);
         if (mode === 'local') { ajoute('Charger depuis Grist', () => chargerDistant(null), true); ajoute('Publier (remplace Grist)', confirmerPublication); }
         if (mode === 'sync') {
             ajoute('Enregistrer maintenant', () => envoyer(), true);
+            ajoute('Historique / restaurer…', () => historique());
             if (st.distant.length) ajoute('Charger ' + st.distant.length + ' section(s) modifiée(s) par un autre', () => chargerDistant(st.distant), true);
         }
         if (mode === 'conflit') { ajoute('Prendre leur version', () => chargerDistant(st.conflits), true); ajoute('Garder la mienne', garderLaMienne); }
@@ -57,6 +58,41 @@
             i.onchange = () => { try { localStorage.setItem('DNB_Auteur', i.value.trim()); } catch (e) { /* ignoré */ } };
             n.appendChild(i);
         }
+    }
+
+    /** Écran d'historique : choisir une section puis une révision à restaurer (nouvelle révision, rien n'est effacé). */
+    async function historique(cle) {
+        const retour = { mode: st.mode, msg: st.msg };
+        if (st.mode === 'historique') return;
+        st.mode = 'historique'; clearTimeout(st.timer); st.timer = null;      // aucun envoi automatique pendant l'écran
+        const cles = Object.keys(await store.revisions()).sort();
+        cle = cle || cles[0];
+        const revs = cle ? await store.history(cle) : [];
+        box.innerHTML = '<strong style="color:#20314a">Grist — historique</strong><div data-m style="margin:4px 0"></div><div data-b></div>';
+        const zone = box.querySelector('[data-b]'), m = box.querySelector('[data-m]');
+        m.textContent = cle ? 'Section « ' + cle + ' » : choisissez la version à restaurer.' : 'Aucune section publiée.';
+        const sel = document.createElement('select'); sel.style.cssText = 'width:100%;margin-bottom:4px';
+        for (const c of cles) { const o = document.createElement('option'); o.value = c; o.textContent = c + (st.illisibles.includes(c) ? ' (illisible)' : ''); o.selected = c === cle; sel.appendChild(o); }
+        sel.onchange = () => { st.mode = retour.mode; historique(sel.value).catch(erreur); };
+        zone.appendChild(sel);
+        for (const v of revs) {
+            const ok = v.complet && !v.courante;
+            const l = 'Révision ' + v.revision + (v.courante ? ' (actuelle)' : '') + ' · ' + Math.round(v.taille / 1024) + ' Ko' + (v.complet ? '' : ' · incomplète') + (v.verifiable ? '' : ' · non vérifiable');
+            const b = bouton(l, () => restaurer(cle, v, retour), ok); b.disabled = !ok; b.style.display = 'block'; b.style.width = '100%'; b.style.textAlign = 'left';
+            zone.appendChild(b);
+        }
+        zone.appendChild(bouton('Retour', async () => { st.mode = retour.mode; if (retour.mode === 'illisible') await demarrer(); else setMode(retour.mode, retour.msg); }));
+    }
+
+    function restaurer(cle, v, retour) {
+        showConfirm('Restaurer la section « ' + esc(cle) + ' » à la révision ' + v.revision + ' ?\nCela crée une nouvelle révision (rien n’est effacé) et remplace cette section dans l’application ouverte.', async () => {
+            try {
+                const r = await store.restore(cle, v.revision, null, v.nonce);
+                st.mode = retour.mode === 'historique' ? 'sync' : retour.mode;
+                if (!r.committed) return signalerRefus(r);
+                await chargerDistant([cle], true);
+            } catch (e) { st.mode = retour.mode; erreur(e); }
+        }, () => {});
     }
 
     async function installer() {

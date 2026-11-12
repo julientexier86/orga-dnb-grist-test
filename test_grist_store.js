@@ -156,5 +156,31 @@ const secs = (g, k) => g.tables.DNB_Sections.filter(r => r.Cle === k);
         assert.deepEqual((await mk(g, 'C').pull()).sections, { s1: 'A', s2: 'B', s3: 'B' });
         const meta = (await mk(g, 'C').pull()).meta; assert.equal(meta.s2.auteur, 'B'); assert.equal(meta.s1.revision, 2);
     }
+    // 14. Historique consultable, restauration vérifiée sans base préalable, lecture légère d'une corruption stable
+    {
+        const g = fakeGrist(), a = mk(g, 'A'); let base = {};
+        for (let i = 1; i <= 5; i++) { const r = await a.push({ s1: { v: i }, s2: 'stable' }, base); assert.ok(r.committed); base = r.baseline; }
+        const h = await a.history('s1');
+        assert.deepEqual(h.map(x => x.revision), [5, 4, 3]);
+        assert.equal(h[0].courante, true); assert.equal(h[1].courante, false);
+        assert.ok(h.every(x => x.complet && x.verifiable));
+        // restauration depuis l'historique, sans passer par un pull complet
+        const rr = await a.restore('s1', h[2].revision, null, h[2].nonce); assert.ok(rr.committed);
+        const lu = await mk(g, 'C').pull(); assert.deepEqual(lu.sections.s1, { v: 3 }); assert.equal(lu.meta.s1.revision, 6);
+        assert.equal(lu.sections.s2, 'stable', 'les autres sections ne bougent pas');
+        // une révision altérée n'est jamais restaurée
+        const alt = g.tables.DNB_Morceaux.find(m => m.Cle_section === 's1' && m.Revision_cible === 4); alt.Contenu = alt.Contenu.replace('4', '9');
+        await assert.rejects(() => a.restore('s1', 4, null), /altérée/);
+        // corruption stable : une seule lecture de la table des morceaux (pas de relectures inutiles)
+        const cur = g.tables.DNB_Morceaux.find(m => m.Cle_section === 's1' && m.Revision_cible === 6); cur.Contenu = cur.Contenu + 'X';
+        let lectures = 0; const c = g.client(), fetchTable = c.fetchTable;
+        c.fetchTable = async t => { if (t === 'DNB_Morceaux') lectures++; return fetchTable(t); };
+        const lu2 = await Store.createStore(c, { auteur: 'D' }).pull();
+        assert.deepEqual(lu2.problems.map(p => p.cle), ['s1']); assert.equal(lectures, 1, 'pas de relecture sans publication concurrente');
+        // et la réparation reste possible par restauration d'une révision saine
+        const sain = (await a.history('s1')).find(x => x.revision === 5);
+        const fix = await a.restore('s1', sain.revision, null, sain.nonce); assert.ok(fix.committed);
+        assert.deepEqual((await mk(g, 'E').pull()).problems, []);
+    }
     console.log('Stockage Grist par sections : aller-retour, conflits, lots atomiques, doublons, corruption, historique OK');
 })().catch(e => { console.error(e); process.exit(1); });
