@@ -7,32 +7,43 @@
     apiScript.onload = () => {
         const grist = window.grist;
         grist.ready({ requiredAccess: 'full' });
+        const blankProject = JSON.parse(JSON.stringify(DB));
         let connected = new URLSearchParams(window.location.search).get('access') === 'full';
         const box = document.createElement('div');
         box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:9000;background:white;color:#20314a;border:1px solid #b7c5d4;border-radius:8px;padding:12px;box-shadow:0 4px 18px #0002;font:14px sans-serif;max-width:340px';
-        box.innerHTML = '<strong>Grist — expérimental</strong><p data-status>En attente de l’autorisation Grist…</p><button data-save disabled>Enregistrer dans Grist</button> <button data-load disabled>Charger depuis Grist</button><p><button data-schema disabled>Créer les tables de démonstration</button></p><p style="font-size:12px">Sauvegardes complètes manuelles. Les utilisateurs doivent coordonner leurs modifications.</p>';
+        box.innerHTML = '<strong>Grist — expérimental</strong><p data-status>En attente de l’autorisation Grist…</p><button data-save disabled>Enregistrer dans Grist</button> <button data-load disabled>Charger depuis Grist</button><p><button data-schema disabled>Créer les tables de démonstration</button> <button data-read disabled>Charger les tables de test</button></p><p style="font-size:12px">Sauvegardes complètes manuelles. Les utilisateurs doivent coordonner leurs modifications.</p>';
         document.body.appendChild(box);
         const status = box.querySelector('[data-status]');
         const save = box.querySelector('[data-save]');
         const load = box.querySelector('[data-load]');
         const schema = box.querySelector('[data-schema]');
+        const read = box.querySelector('[data-read]');
         function setStatus(message) { status.textContent = message; }
-        save.disabled = load.disabled = schema.disabled = !connected;
+        save.disabled = load.disabled = schema.disabled = read.disabled = !connected;
         if (connected) setStatus('Accès demandé. Les données restent locales jusqu’à un enregistrement manuel.');
         grist.onOptions((options, interaction) => {
             connected = new URLSearchParams(window.location.search).get('access') === 'full' || (interaction && (interaction.accessLevel || interaction.access_level) === 'full');
-            save.disabled = load.disabled = schema.disabled = !connected;
+            save.disabled = load.disabled = schema.disabled = read.disabled = !connected;
             setStatus(connected ? 'Connecté. Les données restent locales jusqu’à un enregistrement manuel.' : 'Autorise l’accès complet au document de test dans Grist.');
         });
         async function rows() {
             try { return await grist.docApi.fetchTable(TABLE); }
             catch (e) { throw new Error('Table OrgaExamSauvegardes inaccessible. Crée-la avec les colonnes Date_UTC, Libelle et Donnees_JSON (texte). ' + e.message); }
         }
+        read.onclick = async () => {
+            try {
+                const candidate = await window.readDnbStructuredSession(grist.docApi, blankProject);
+                showConfirm('Charger les élèves, salles, enseignants et affectations des tables Grist ? Cela remplace le projet ouvert dans l’application. Les autres modules repartent vides.', () => {
+                    loadGlobalData(new File([JSON.stringify(candidate)], 'tables-grist.data', {type:'application/json'}));
+                    setStatus('Tables chargées en lecture. Les modifications ne sont pas synchronisées vers ces tables.');
+                });
+            } catch (e) { setStatus('Lecture impossible : ' + e.message); }
+        };
         schema.onclick = async () => {
             schema.disabled = true;
             try { const n = await window.createDnbDemoSchema(grist.docApi); setStatus(n + ' tables créées avec des exemples fictifs.'); }
             catch (e) { setStatus('Création impossible : ' + e.message); }
-            finally { schema.disabled = !connected; }
+            finally { schema.disabled = read.disabled = !connected; }
         };
         save.onclick = async () => {
             save.disabled = load.disabled = true;
@@ -44,7 +55,7 @@
                 }]]);
                 setStatus('Sauvegarde ajoutée à Grist : ' + new Date(now).toLocaleString('fr-FR'));
             } catch (e) { setStatus('Échec : ' + e.message); }
-            finally { save.disabled = load.disabled = schema.disabled = !connected; }
+            finally { save.disabled = load.disabled = schema.disabled = read.disabled = !connected; }
         };
         load.onclick = async () => {
             save.disabled = load.disabled = true;
@@ -60,7 +71,7 @@
                     setStatus('Chargement demandé depuis Grist.');
                 });
             } catch (e) { setStatus('Échec : ' + e.message); }
-            finally { save.disabled = load.disabled = schema.disabled = !connected; }
+            finally { save.disabled = load.disabled = schema.disabled = read.disabled = !connected; }
         };
     };
     apiScript.onerror = () => console.error('Impossible de charger l’API des widgets Grist.');
