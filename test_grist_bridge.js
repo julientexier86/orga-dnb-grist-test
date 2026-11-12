@@ -117,6 +117,7 @@ const grandProjet = () => ({ config: { schoolName: 'Collège fictif', year: '202
         // issue 1 : charger le lisible
         clic(w, 'Charger les sections lisibles'); await until(() => /synchronisé/.test(titre(w)), 'chargement du lisible');
         assert.equal(w.eval('DB.students.length'), 1);
+        assert.equal(w.eval('DB.rooms.length'), 1, 'la section illisible garde sa valeur locale (pas de clé manquante)');
         // issue 2 (nouvelle ouverture) : publier le projet local répare la section
         const w2 = lancer(faux(g), grandProjet());
         await until(() => /illisible/.test(titre(w2)), 'mode illisible 2');

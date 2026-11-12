@@ -85,7 +85,7 @@
         const lu = await store.pull();
         if (lu.problems.length && !ignorerProblemes) throw new Error('Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', '));
         const cibles = cles || Object.keys(lu.sections);
-        const local = cles ? sections() : {};
+        const local = (cles || ignorerProblemes) ? sections() : {};   // chargement partiel : les sections absentes de Grist gardent leur valeur locale (sinon l'application plante)
         for (const k of cibles) if (k in lu.sections) local[k] = lu.sections[k];
         const base = cles ? Object.assign({}, st.baseline) : {};
         for (const k of cibles) if (lu.baseline[k]) base[k] = lu.baseline[k];
