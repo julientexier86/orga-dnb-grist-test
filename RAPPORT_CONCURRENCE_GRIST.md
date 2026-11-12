@@ -48,3 +48,27 @@ Défauts découverts grâce à l'essai réel (et corrigés) : (a) la limite port
 4. Droits par colonne (INE, aménagements, résultats) et revue des widgets du document de destination.
 5. Dépendance ExcelJS chargée depuis `cdnjs.cloudflare.com` lors de l'export Excel : à embarquer localement.
 6. Répétition de migration + restauration sur fixtures, puis seulement après, document réel dédié.
+
+## Protection par ligne pour les tables structurées (mesuré le 12/11/2026)
+
+Décision de Julien le 12/11 : les tables Grist deviennent la source de vérité, pour tous les domaines.
+Mesures faites sur l'instance, document de laboratoire fictif, compte propriétaire, table `TEST_Lignes`.
+
+Dispositif : colonnes `Base` (Int), `Jeton` (Text), `Revision` (Int, formule de déclenchement `(value or 0) + 1`,
+recalculée à chaque modification de la ligne), règle `newRec.Jeton != rec.Jeton and newRec.Base != rec.Revision` -> `-U`,
+et règle sans condition -> `-D`.
+
+| Essai | Résultat |
+|---|---|
+| Modification d'une cellule sans toucher `Jeton` (saisie humaine dans Grist) | acceptée, `Revision` +1 |
+| Écriture de l'application (`Jeton` neuf, `Base` = révision lue) | acceptée, `Revision` +1 |
+| Écriture périmée (`Jeton` neuf, `Base` ancienne), y compris `Base` égale à la `Base` déjà stockée | refusée (403) |
+| Lot de deux lignes dont une périmée (`UpdateRecord` x2, puis `BulkUpdateRecord`) | lot refusé en entier, aucune ligne modifiée |
+| Suppression d'une ligne | refusée (403) |
+
+Constats annexes : `AddTable` ignore `recalcWhen` ; il faut un `ModifyColumn` séparé (`recalcWhen: 2`), sinon la
+révision ne bouge pas et la protection est inopérante. À vérifier à chaque installation.
+
+Limites : mesuré avec le seul rôle propriétaire ; rien ne garantit l'unicité de `Cle` à la création ; une personne
+ayant le droit d'écriture peut modifier `Base`/`Jeton`/`Revision` à la main (colonnes à masquer et à verrouiller).
+Non encore mesuré : rôles éditeur et lecteur, règles de colonne sur les données sensibles.
