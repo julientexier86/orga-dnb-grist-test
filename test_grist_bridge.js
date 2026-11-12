@@ -118,6 +118,11 @@ const grandProjet = () => ({ config: { schoolName: 'Collège fictif', year: '202
         clic(w, 'Charger les sections lisibles'); await until(() => /synchronisé/.test(titre(w)), 'chargement du lisible');
         assert.equal(w.eval('DB.students.length'), 1);
         assert.equal(w.eval('DB.rooms.length'), 1, 'la section illisible garde sa valeur locale (pas de clé manquante)');
+        // une section illisible ne doit pas être signalée comme « modifiée par un autre » après un envoi
+        w.eval('DB.students.push({id:"E9",nom:"FICTIF9"}); autoSave();');
+        await until(() => g.tables.DNB_Sections.find(s => s.Cle === 'students').Revision === 2, 'envoi après chargement partiel', 8000);
+        await sleep(300);
+        assert.ok(!boutons(w).some(b => /Charger \d+ section/.test(b)), 'faux signal « modifié par un autre » : ' + boutons(w));
         // issue 2 (nouvelle ouverture) : publier le projet local répare la section
         const w2 = lancer(faux(g), grandProjet());
         await until(() => /illisible/.test(titre(w2)), 'mode illisible 2');

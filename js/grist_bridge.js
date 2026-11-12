@@ -71,7 +71,7 @@
         st.verifiable = prot.verifiable;
         if (!prot.ok && !st.ok) return setMode('nonprotege', prot.raison + '. Aucune écriture n’est faite tant que la protection contre les écrasements n’est pas en place.');
         const lu = await store.pull();
-        st.baseline = lu.baseline;
+        st.baseline = lu.baseline; st.illisibles = lu.problems.map(p => p.cle);
         if (lu.problems.length) return setMode('illisible', 'Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', ') + '. Aucune écriture automatique ; choisissez.');
         if (!Object.keys(lu.sections).length) return setMode('vide', 'Aucun projet dans ce document Grist. Le projet local n’est pas envoyé automatiquement.');
         if (!(DB.students && DB.students.length) && !(DB.rooms && DB.rooms.length)) return chargerDistant(null);
@@ -86,6 +86,7 @@
         etape('Lecture de Grist…');
         const lu = await store.pull();
         etape('Chargement dans l’application…');
+        st.illisibles = lu.problems.map(p => p.cle);
         if (lu.problems.length && !ignorerProblemes) throw new Error('Section(s) illisible(s) dans Grist : ' + lu.problems.map(p => p.cle).join(', '));
         const cibles = cles || Object.keys(lu.sections);
         const local = (cles || ignorerProblemes) ? sections() : {};   // chargement partiel : les sections absentes de Grist gardent leur valeur locale (sinon l'application plante)
@@ -125,7 +126,10 @@
         if (st.occupe || st.mode !== 'sync') return;
         st.occupe = true;
         try {
-            const r = await store.push(sections(), st.baseline);
+            // l'envoi automatique ne touche jamais une section illisible : seul « Publier (répare) », explicite, le fait
+            const mes = (await store.changedKeys(sections(), st.baseline)).filter(k => !(st.illisibles || []).includes(k));
+            if (!mes.length) { st.timer = null; return; }
+            const r = await store.push(sections(), st.baseline, { seulement: mes });
             if (!r.committed) return signalerRefus(r);
             st.baseline = r.baseline; st.timer = null;
             if (r.saved.length) { st.distant = st.distant.filter(k => !r.saved.includes(k)); setMode('sync', 'Enregistré dans Grist à ' + heure() + ' (' + r.saved.join(', ') + ').'); }
@@ -147,7 +151,7 @@
     async function verifierDistant() {
         if (st.mode !== 'sync' && st.mode !== 'conflit') return;
         const rev = await store.revisions();
-        const nouveaux = Object.keys(rev).filter(k => rev[k].revision > ((st.baseline[k] || {}).revision || 0) && !st.conflits.includes(k));
+        const nouveaux = Object.keys(rev).filter(k => rev[k].revision > ((st.baseline[k] || {}).revision || 0) && !st.conflits.includes(k) && !(st.illisibles || []).includes(k));   // une section illisible n'est pas « modifiée par un autre »
         if (nouveaux.join() === st.distant.join()) return;
         st.distant = nouveaux;
         if (st.mode === 'sync') setMode('sync', nouveaux.length ? 'Modifications disponibles de ' + [...new Set(nouveaux.map(k => rev[k].auteur || 'un autre utilisateur'))].join(', ') + '.' : st.msg);
