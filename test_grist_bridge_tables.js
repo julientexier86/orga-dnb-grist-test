@@ -94,6 +94,12 @@ const vide = { students: [], rooms: [] };
     assert.equal(g.log.length, n7, 'aucune écriture après un import'); assert.equal(ligne(g, M.T.ELEVES, 'e1').Supprime, false);
     clic(w, 'Recharger depuis Grist'); await until(() => /synchronisé/.test(titre(w)) && w.eval('DB.students.length') === 3, 'retour à Grist');
 
+    // 7 bis. Projet incomplet dans Grist : complété par les valeurs par défaut de l'application avant chargement
+    { const h = fakeGrist(); await R.install(h.client()); const s = R.createRowStore(h.client()); await s.push({ students: [eleve('e1')], config: { schoolName: 'Partiel' } }, (await s.pull()).etat); await R.ecrireMode(h.client(), 'tables');
+      const wd = lancer(faux(h), { students: [], rooms: [], config: { schoolName: '', year: '2026' }, stage: { juries: [] } });
+      await until(() => /synchronisé \(tables\)/.test(titre(wd)), 'projet incomplet chargé');
+      assert.deepEqual(JSON.parse(wd.eval('JSON.stringify([DB.students.length, DB.config.schoolName, DB.config.year, DB.stage, DB.rooms])')), [1, 'Partiel', '2026', { juries: [] }, []]); }
+
     // 8. Protection abîmée : aucune écriture, réparation proposée
     { const h = fakeGrist(); await R.install(h.client()); const s = R.createRowStore(h.client()); await s.push(projet(), (await s.pull()).etat); await R.ecrireMode(h.client(), 'tables');
       const res = h.tables._grist_ACLResources.find(x => x.tableId === M.T.ELEVES); h.tables._grist_ACLRules = h.tables._grist_ACLRules.filter(x => x.resource !== res.id);

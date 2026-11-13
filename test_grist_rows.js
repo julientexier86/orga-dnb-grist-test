@@ -90,6 +90,17 @@ const nb = (g, op) => g.log.flat().filter(a => a[0] === op).length;
       h.tables._grist_ACLRules = [];
       const m1 = copie(u.db); mod(m1, 0, e => e.classe = 'X'); const m2 = copie(v.db); mod(m2, 0, e => e.classe = 'Y');
       await S1.push(m1, u.etat); assert.ok((await S2.push(m2, v.etat)).ok, 'témoin : sans règle, écrasement silencieux'); assert.strictEqual((await R.verify(ap)).ok, false); }
+    // 10 bis. ligne supprimée dans Grist puis recréée chez moi (absente de ma base) : pas de faux conflit
+    { const h = fakeGrist(), ap = h.client(); await R.install(ap); const S = R.createRowStore(ap);
+      let u = await S.pull(); await S.push(projet(), u.etat); u = await S.pull();
+      const sans = copie(u.db); delete sans.config.schoolName; sans.teachers = []; await S.push(sans, u.etat); u = await S.pull();   // lignes marquées supprimées
+      const base = R.instantane(u.db), moi = copie(u.db); moi.config.schoolName = 'Recréé'; moi.teachers = [{ id: 't1', civ: 'M.', nom: 'RETOUR', prenom: 'Lou', matiere: 'EPS' }];
+      const f = S.fusion(base, moi, u.etat, 'distant'); assert.deepStrictEqual(f.conflits, [], 'recréation sans conflit'); assert.ok(M.deepEqual(f.db, moi));
+      assert.ok((await S.push(f.db, u.etat)).ok); assert.ok(M.deepEqual((await S.pull()).db, moi));
+      // en revanche deux créations simultanées différentes de la même clé restent un conflit
+      const autre = copie(moi); autre.config.ville = 'A'; const S2 = R.createRowStore(h.client()); const v = await S2.pull(); await S2.push(autre, v.etat);
+      const moi2 = copie(moi); moi2.config.ville = 'B'; const d = await S.pull(); assert.strictEqual(S.fusion(R.instantane(moi), moi2, d.etat, 'distant').conflits.length, 1); }
+
     // 11. droits des lecteurs : colonnes sensibles masquées, installation idempotente, le reste intact
     { const h = fakeGrist(), ap = h.client(); await R.install(ap); assert.strictEqual((await R.verifierDroitsLecteurs(ap)).ok, false);
       assert.ok((await R.installerDroitsLecteurs(ap)).ok); const n = h.tables._grist_ACLRules.length; assert.ok((await R.installerDroitsLecteurs(ap)).ok); assert.strictEqual(h.tables._grist_ACLRules.length, n);

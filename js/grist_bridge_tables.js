@@ -17,6 +17,16 @@
 
     const esc = s => (typeof escapeHTML === 'function' ? escapeHTML(s) : String(s));
     const local = () => JSON.parse(JSON.stringify(DB));
+    /* Projet par défaut de l'application, pris au chargement (dans Grist, rien n'est restauré avant). L'application
+     * plante sur un projet incomplet : avant de charger un projet venu de Grist, on comble les sections et les
+     * réglages absents avec ces valeurs par défaut. Ces ajouts repartent ensuite vers Grist comme une modification normale. */
+    const DEFAUTS = (() => { try { return JSON.parse(JSON.stringify(DB)); } catch (e) { return {}; } })();
+    const estObjet = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+    function completer(db) {
+        const d = JSON.parse(JSON.stringify(DEFAUTS)), out = Object.assign({}, d, db);
+        for (const k of Object.keys(d)) if (estObjet(d[k]) && estObjet(db[k])) out[k] = Object.assign({}, d[k], db[k]);
+        return out;
+    }
     const heure = () => new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     const erreur = e => setMode('erreur', 'Erreur : ' + (e && e.message || e));
     const NOMS = t => t.replace('DNB_', '').replace(/_/g, ' ').toLowerCase();
@@ -76,7 +86,7 @@
             await new Promise((res, rej) => {
                 const delai = setTimeout(() => rej(new Error('L’application n’a pas terminé le chargement (aucune réponse après 20 s).')), 20000);
                 window.__dnbChargementInterne = true;
-                loadGlobalData(new File([JSON.stringify(db)], 'grist.data', { type: 'application/json' }), () => { clearTimeout(delai); res(); });
+                loadGlobalData(new File([JSON.stringify(completer(db))], 'grist.data', { type: 'application/json' }), () => { clearTimeout(delai); res(); });
             });
         } finally { st.chargement = false; window.__dnbChargementInterne = false; }
         // la base est ce que Grist contient (db), pas ce que l'application en a fait : les réparations

@@ -130,6 +130,9 @@
                     if (!l && b) l = Object.assign({}, b.vals, { Supprime: true });          // supprimée chez moi
                     if (!l) { pour[t].push(Object.assign({ Cle: cle }, r.vals)); continue; }   // créée par un autre
                     if (!r) { pour[t].push(Object.assign({ Cle: cle }, l)); continue; }        // créée par moi
+                    // absente de ma base et marquée supprimée dans Grist : pour moi elle n'existait pas, donc je la (re)crée
+                    // sans conflit (cas d'une ligne supprimée puis recréée, par exemple après une bascule)
+                    if (!b && r.vals.Supprime) { pour[t].push(Object.assign({ Cle: cle }, l)); continue; }
                     const out = { Cle: cle };
                     for (const [c] of colonnesDonnees(t)) {
                         const vb = b ? b.vals[c] : null, vl = l[c], vr = r.vals[c];
