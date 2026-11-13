@@ -31,8 +31,8 @@
     const erreur = e => setMode('erreur', 'Erreur : ' + (e && e.message || e));
     const NOMS = t => t.replace('DNB_', '').replace(/_/g, ' ').toLowerCase();
 
-    const TITRES = { init: 'connexion…', sync: 'synchronisé (tables)', conflit: 'conflit', erreur: 'erreur', nonprotege: 'tables non protégées', local: 'projet local (non publié)', vide: 'tables vides' };
-    const COULEURS = { init: '#656d70', sync: '#2f6f5e', conflit: '#9a4a2e', erreur: '#9a4a2e', nonprotege: '#9a4a2e', local: '#9a7a2e', vide: '#9a7a2e' };
+    const TITRES = { absent: 'stockage à initialiser', init: 'connexion…', sync: 'synchronisé (tables)', conflit: 'conflit', erreur: 'erreur', nonprotege: 'tables non protégées', local: 'projet local (non publié)', vide: 'tables vides' };
+    const COULEURS = { absent: '#9a7a2e', init: '#656d70', sync: '#2f6f5e', conflit: '#9a4a2e', erreur: '#9a4a2e', nonprotege: '#9a4a2e', local: '#9a7a2e', vide: '#9a7a2e' };
     function bouton(label, fn, primaire) {
         const b = document.createElement('button');
         b.textContent = label;
@@ -49,6 +49,7 @@
         box.innerHTML = '<strong style="color:' + COULEURS[mode] + '">Grist — ' + esc(TITRES[mode] || mode) + '</strong><div data-m style="margin:4px 0"></div><div data-b></div>';
         box.querySelector('[data-m]').textContent = st.msg + (st.problemes.length ? ' Attention : ' + st.problemes.length + ' doublon(s) de clé dans Grist (la ligne la plus ancienne fait foi).' : '');
         const zone = box.querySelector('[data-b]'), ajoute = (l, f, p) => zone.appendChild(bouton(l, f, p));
+        if (mode === 'absent') ajoute('Initialiser le stockage (propriétaire)', reparer, true);
         if (mode === 'nonprotege') ajoute('Réparer la protection (propriétaire)', reparer, true);
         if (mode === 'vide') ajoute('Publier le projet local dans les tables', () => publier(), true);
         if (mode === 'local') { ajoute('Recharger depuis Grist', () => charger(), true); ajoute('Publier (remplace le contenu des tables)', confirmerPublication); }
@@ -61,12 +62,15 @@
         if (mode === 'conflit') { ajoute('Prendre la version de Grist', () => resoudre('distant'), true); ajoute('Garder la mienne', () => resoudre('local')); }
     }
 
-    async function reparer() { const r = await R.install(grist.docApi); if (!r.ok) throw new Error('Installation incomplète (' + r.etape + ') : ' + r.details.join(' ; ')); await demarrer(); }
+    async function reparer() { const r = await R.install(grist.docApi); if (!r.ok) throw new Error('Installation incomplète (' + r.etape + ') : ' + r.details.join(' ; ')); if ((await R.lireMode(grist.docApi)) !== 'tables') await R.ecrireMode(grist.docApi, 'tables'); await demarrer(); }
 
     async function demarrer() {
         st.actif = true;
         setMode('init', 'Vérification des tables…');
         const v = await R.verify(grist.docApi);
+        // document neuf, ou copie « modèle sans données » : tout ou partie du stockage reste à créer, sans rien à protéger encore
+        if (!v.ok && v.lisible && v.manques.every(x => /^(table |ligne de )/.test(x) || /^(colonne|révision automatique|règle|signature|structure)/.test(x)) && v.manques.some(x => /^(table |ligne de )/.test(x)))
+            return setMode('absent', 'Ce document n’a pas encore son stockage complet (' + v.manques.length + ' élément(s) à créer). Aucune donnée n’est écrite avant.');
         if (!v.ok) return setMode('nonprotege', (v.lisible ? 'Éléments manquants : ' + v.manques.slice(0, 4).join(', ') + (v.manques.length > 4 ? '…' : '') : 'Règles illisibles avec ce compte') + '. Aucune écriture n’est faite.');
         try { st.lecteursOK = (await R.verifierDroitsLecteurs(grist.docApi)).ok; } catch (e) { st.lecteursOK = false; }
         etape('Lecture des tables…');
@@ -192,7 +196,9 @@
 
     window.DnbPontTables = {
         /* Ce document est-il en mode tables ? (marque écrite en fin de bascule) */
-        async actif(g) { return (await R.lireMode(g.docApi)) === 'tables'; },
+        /* blocsVides : le document ne contient aucun projet en blocs (document neuf ou copie sans données) ;
+         * dans ce cas, et sans marque contraire, les tables sont le mode par défaut. */
+        async actif(g, blocsVides) { const m = await R.lireMode(g.docApi); return m === 'tables' || (m !== 'blocs' && !!blocsVides); },
         /* options.retourBlocs(db) : publie db dans les blocs (fourni par le pont des blocs). */
         async demarrer(g, options) { brancher(g); retourBlocs = options && options.retourBlocs || null; return demarrer(); },
         /* Bascule blocs -> tables : installe, prouve la protection, publie le projet ouvert, relit, puis seulement écrit la marque. */

@@ -111,8 +111,8 @@
             p.textContent = 'Un fichier de projet neuf est téléchargé. Le projet ouvert n’est pas modifié. Pour la nouvelle session : créez un document Grist neuf, ouvrez-y l’application, chargez ce fichier puis publiez-le.';
             carte.appendChild(p);
             for (const [cle, texte] of [['enseignants', 'Conserver la liste des enseignants'], ['dates', 'Conserver les dates des épreuves et de l’oral']]) {
-                const l = document.createElement('label'); l.style.cssText = 'display:block;margin:4px 0;cursor:pointer';
-                const c = document.createElement('input'); c.type = 'checkbox'; c.checked = etat[cle]; c.style.marginRight = '6px'; c.onchange = () => { etat[cle] = c.checked; rendre(); };
+                const l = document.createElement('label'); l.style.cssText = 'display:flex;align-items:center;gap:8px;margin:6px 0;cursor:pointer';
+                const c = document.createElement('input'); c.type = 'checkbox'; c.checked = etat[cle]; c.style.cssText = 'display:inline-block;width:auto;margin:0;flex:none'; c.onchange = () => { etat[cle] = c.checked; rendre(); };
                 l.appendChild(c); l.appendChild(document.createTextNode(texte)); carte.appendChild(l);
             }
             ligne('Repris dans le nouveau projet', r.rapport.conserve);

@@ -201,7 +201,8 @@
         const tout = m.res.find(x => x.tableId === '*' && x.colIds === '*');
         if (!tout || !m.rules.some(x => x.resource === tout.id && x.aclFormula === REGLE_S && x.permissionsText === '-S')) manques.push('structure réservée au propriétaire');
         if (!m.idTable.has(T_ETAT)) manques.push('table ' + T_ETAT);
-        else for (const t of TABLES) { const c = m.col(T_ETAT, colEtat(t)); if (!c || !c.isFormula || c.formula !== formuleEtat(t)) manques.push('signature de ' + t); }
+        else { try { if (!rowsOf(await api.fetchTable(T_ETAT)).length) manques.push('ligne de ' + T_ETAT + ' (document copié sans données)'); } catch (e) { manques.push('lecture de ' + T_ETAT); } }
+        if (m.idTable.has(T_ETAT)) for (const t of TABLES) { const c = m.col(T_ETAT, colEtat(t)); if (!c || !c.isFormula || c.formula !== formuleEtat(t)) manques.push('signature de ' + t); }
         return { ok: manques.length === 0, manques, lisible: true };
     }
     /* Preuve en conditions réelles : sur une ligne-sonde de chaque table, une écriture périmée et une suppression

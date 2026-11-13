@@ -121,7 +121,13 @@
 
     async function demarrer() {
         if (window.DnbPontTables) {
-            let tables = false; try { tables = await window.DnbPontTables.actif(grist); } catch (e) { tables = false; }
+            let tables = false;
+            try {
+                const presentes = (await grist.docApi.listTables()).map(t => (typeof t === 'string' ? t : t.id));
+                let blocsVides = !presentes.includes(Store.T_SECTIONS);
+                if (!blocsVides) { const c = await grist.docApi.fetchTable(Store.T_SECTIONS); blocsVides = !(c.id || []).length; }
+                tables = await window.DnbPontTables.actif(grist, blocsVides);
+            } catch (e) { tables = false; }
             if (tables) { st.mode = 'tables'; clearTimeout(st.timer); st.timer = null; box.style.display = 'none'; return window.DnbPontTables.demarrer(grist, { retourBlocs: publierDansBlocs }); }
         }
         const noms = (await grist.docApi.listTables()).map(t => (typeof t === 'string' ? t : t.id));

@@ -38,10 +38,12 @@ const vide = { students: [], rooms: [] };
 
 (async () => {
     // 1. Document en blocs, synchronisé ; bascule explicite vers les tables
-    const g = fakeGrist(), w = lancer(faux(g), projet());
-    await until(() => /à initialiser/.test(titre(w)), 'à initialiser'); clic(w, 'Initialiser');
-    await until(() => /Grist vide/.test(titre(w)), 'vide'); clic(w, 'Publier le projet local');
-    await until(() => /synchronisé/.test(titre(w)), 'synchronisé (blocs)');
+    const g = fakeGrist();
+    { const c = g.client(); await Store.installProtection(c); const s0 = Store.createStore(c, { auteur: () => 'Essai' }); const r0 = await s0.push(Store.splitDb(projet()), (await s0.pull()).baseline); assert.ok(r0.committed); }
+    const w = lancer(faux(g), projet());
+    await until(() => /synchronisé/.test(titre(w)) || w.eval('confirms.length') > 0, 'document en blocs');
+    if (w.eval('confirms.length')) { confirmer(w); }
+    await until(() => /synchronisé$/.test(titre(w).trim()), 'synchronisé (blocs)');
     assert.ok(!g.tables[M.T.ELEVES], 'aucune table structurée avant la bascule');
     clic(w, 'Passer aux tables'); confirmer(w, false); await sleep(50); assert.ok(!g.tables[M.T.ELEVES], 'annuler ne fait rien');
     clic(w, 'Passer aux tables'); confirmer(w);
@@ -99,6 +101,18 @@ const vide = { students: [], rooms: [] };
       const wd = lancer(faux(h), { students: [], rooms: [], config: { schoolName: '', year: '2026' }, stage: { juries: [] } });
       await until(() => /synchronisé \(tables\)/.test(titre(wd)), 'projet incomplet chargé');
       assert.deepEqual(JSON.parse(wd.eval('JSON.stringify([DB.students.length, DB.config.schoolName, DB.config.year, DB.stage, DB.rooms])')), [1, 'Partiel', '2026', { juries: [] }, []]); }
+
+    // 7 ter. Document neuf : les tables sont le mode par défaut, une seule initialisation, rien n'est publié sans action
+    { const h = fakeGrist(), wn = lancer(faux(h), projet());
+      await until(() => /à initialiser/.test(titre(wn)), 'document neuf'); assert.equal(h.log.length, 0); assert.ok(!boutons(wn).some(b => /Publier/.test(b)));
+      clic(wn, 'Initialiser le stockage'); await until(() => /tables vides/.test(titre(wn)), 'tables vides', 15000);
+      assert.equal(await R.lireMode(h.client()), 'tables'); assert.ok((await R.verify(h.client())).ok); assert.ok(!h.tables.DNB_Sections, 'aucun bloc créé pour un document neuf');
+      assert.equal(h.tables[M.T.ELEVES].filter(x => x.Cle !== '_sonde').length, 0);
+      clic(wn, 'Publier le projet local'); await until(() => /synchronisé \(tables\)/.test(titre(wn)), 'publié'); assert.equal(h.tables[M.T.ELEVES].filter(x => x.Cle !== '_sonde').length, 3);
+      // copie « modèle sans données » : structure et règles présentes, aucune ligne (ni DNB_Etat, ni sondes, ni marque)
+      for (const t of Object.keys(h.tables)) if (t.startsWith('DNB_')) h.tables[t] = [];
+      const wc = lancer(faux(h), vide); await until(() => /à initialiser/.test(titre(wc)), 'copie modèle'); clic(wc, 'Initialiser le stockage');
+      await until(() => /tables vides/.test(titre(wc)), 'copie modèle prête', 15000); assert.ok((await R.verify(h.client())).ok); assert.equal(await R.lireMode(h.client()), 'tables'); }
 
     // 8. Protection abîmée : aucune écriture, réparation proposée
     { const h = fakeGrist(); await R.install(h.client()); const s = R.createRowStore(h.client()); await s.push(projet(), (await s.pull()).etat); await R.ecrireMode(h.client(), 'tables');
